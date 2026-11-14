@@ -1,0 +1,236 @@
+import { create } from 'zustand'
+import { persist } from 'zustand/middleware'
+import type { ProfitMargin } from '@/lib/pricing'
+import {
+  mockAccountProducts,
+  mockBankDetails,
+  mockBroadcasts,
+  mockCoupons,
+  mockProfitMargins,
+  mockSupportTickets,
+} from '@/services/mocks'
+import type {
+  AccountProduct,
+  BankAccountDetails,
+  Broadcast,
+  BroadcastAudience,
+  Coupon,
+  SupportTicket,
+  SupportTicketCategory,
+  SupportTicketStatus,
+  TicketAuthor,
+} from '@/types'
+
+export type ProviderKeyId = 'accounts' | 'wallet' | 'vpn'
+
+export interface ProviderCredential {
+  value: string
+  updatedAt: string | null
+}
+
+interface CreateTicketInput {
+  subject: string
+  category: SupportTicketCategory
+  body: string
+  userId: string
+  userName: string
+}
+
+interface BroadcastInput {
+  message: string
+  audience: BroadcastAudience
+  recipients: number
+}
+
+interface AdminState {
+  coupons: Coupon[]
+  /** Catalogue last synced from the provider (seeded with fixtures until then). */
+  products: AccountProduct[]
+  /** Provider base price → customer price markups, keyed by product id. */
+  margins: Record<string, ProfitMargin>
+  /** Manual bank-transfer destination shown to customers in «افزایش موجودی». */
+  bankDetails: BankAccountDetails
+  /** Shared inbox — the Mini App opens tickets, the admin panel answers them. */
+  tickets: SupportTicket[]
+  broadcasts: Broadcast[]
+  /**
+   * Mock-only credential vault. Real provider keys must live server-side
+   * behind the Cloudflare proxy — these never leave the browser.
+   */
+  providerKeys: Record<ProviderKeyId, ProviderCredential>
+  saveCoupon: (coupon: Coupon) => void
+  toggleCoupon: (id: string) => void
+  removeCoupon: (id: string) => void
+  setProducts: (products: AccountProduct[]) => void
+  setMargin: (productId: string, margin: ProfitMargin | null) => void
+  saveBankDetails: (details: Omit<BankAccountDetails, 'updatedAt'>) => void
+  createTicket: (input: CreateTicketInput) => SupportTicket
+  replyToTicket: (id: string, body: string, author: TicketAuthor) => void
+  setTicketStatus: (id: string, status: SupportTicketStatus) => void
+  sendBroadcast: (input: BroadcastInput) => Broadcast
+  saveProviderKey: (id: ProviderKeyId, value: string) => void
+  clearProviderKey: (id: ProviderKeyId) => void
+}
+
+const EMPTY_CREDENTIAL: ProviderCredential = { value: '', updatedAt: null }
+
+export const useAdminStore = create<AdminState>()(
+  persist(
+    (set) => ({
+      coupons: mockCoupons,
+      products: mockAccountProducts,
+      margins: mockProfitMargins,
+      bankDetails: mockBankDetails,
+      tickets: mockSupportTickets,
+      broadcasts: mockBroadcasts,
+      providerKeys: {
+        accounts: EMPTY_CREDENTIAL,
+        wallet: EMPTY_CREDENTIAL,
+        vpn: EMPTY_CREDENTIAL,
+      },
+
+      saveCoupon: (coupon) => {
+        const normalized: Coupon = { ...coupon, code: coupon.code.trim().toUpperCase() }
+        set((state) => {
+          const exists = state.coupons.some((item) => item.id === normalized.id)
+          return {
+            coupons: exists
+              ? state.coupons.map((item) => (item.id === normalized.id ? normalized : item))
+              : [normalized, ...state.coupons],
+          }
+        })
+      },
+
+      toggleCoupon: (id) => {
+        set((state) => ({
+          coupons: state.coupons.map((coupon) =>
+            coupon.id === id ? { ...coupon, active: !coupon.active } : coupon,
+          ),
+        }))
+      },
+
+      removeCoupon: (id) => {
+        set((state) => ({ coupons: state.coupons.filter((coupon) => coupon.id !== id) }))
+      },
+
+      setProducts: (products) => {
+        set({ products })
+      },
+
+      setMargin: (productId, margin) => {
+        set((state) => {
+          const margins = { ...state.margins }
+          if (margin && margin.value > 0) margins[productId] = margin
+          else delete margins[productId]
+          return { margins }
+        })
+      },
+
+      saveBankDetails: (details) => {
+        set({ bankDetails: { ...details, updatedAt: new Date().toISOString() } })
+      },
+
+      createTicket: (input) => {
+        const now = new Date().toISOString()
+        const ticket: SupportTicket = {
+          id: `tkt_${Date.now().toString(36)}`,
+          userId: input.userId,
+          userName: input.userName,
+          subject: input.subject.trim(),
+          category: input.category,
+          status: 'open',
+          createdAt: now,
+          updatedAt: now,
+          messages: [
+            {
+              id: `msg_${Date.now().toString(36)}`,
+              author: 'user',
+              body: input.body.trim(),
+              createdAt: now,
+            },
+          ],
+        }
+        set((state) => ({ tickets: [ticket, ...state.tickets] }))
+        return ticket
+      },
+
+      replyToTicket: (id, body, author) => {
+        const trimmed = body.trim()
+        if (!trimmed) return
+        const now = new Date().toISOString()
+        set((state) => ({
+          tickets: state.tickets.map((ticket) =>
+            ticket.id === id
+              ? {
+                  ...ticket,
+                  status: author === 'support' ? 'answered' : 'open',
+                  updatedAt: now,
+                  messages: [
+                    ...ticket.messages,
+                    {
+                      id: `msg_${Date.now().toString(36)}_${ticket.messages.length}`,
+                      author,
+                      body: trimmed,
+                      createdAt: now,
+                    },
+                  ],
+                }
+              : ticket,
+          ),
+        }))
+      },
+
+      setTicketStatus: (id, status) => {
+        set((state) => ({
+          tickets: state.tickets.map((ticket) =>
+            ticket.id === id
+              ? { ...ticket, status, updatedAt: new Date().toISOString() }
+              : ticket,
+          ),
+        }))
+      },
+
+      sendBroadcast: (input) => {
+        const broadcast: Broadcast = {
+          id: `bcast_${Date.now().toString(36)}`,
+          message: input.message.trim(),
+          audience: input.audience,
+          recipients: input.recipients,
+          sentAt: new Date().toISOString(),
+        }
+        set((state) => ({ broadcasts: [broadcast, ...state.broadcasts] }))
+        return broadcast
+      },
+
+      saveProviderKey: (id, value) => {
+        set((state) => ({
+          providerKeys: {
+            ...state.providerKeys,
+            [id]: { value: value.trim(), updatedAt: new Date().toISOString() },
+          },
+        }))
+      },
+
+      clearProviderKey: (id) => {
+        set((state) => ({
+          providerKeys: { ...state.providerKeys, [id]: EMPTY_CREDENTIAL },
+        }))
+      },
+    }),
+    {
+      name: 'varnet.admin.state',
+      version: 1,
+      // Credentials stay out of localStorage on purpose; coupons, pricing,
+      // bank details and support state survive a refresh so the demo feels
+      // like a real admin panel.
+      partialize: (state) => ({
+        coupons: state.coupons,
+        products: state.products,
+        margins: state.margins,
+        bankDetails: state.bankDetails,
+        tickets: state.tickets,
+        broadcasts: state.broadcasts,
+      }),
+    },
+  ),
+)

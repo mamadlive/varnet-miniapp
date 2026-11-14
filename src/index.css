@@ -1,0 +1,238 @@
+@import "tailwindcss";
+
+/* `dark:` follows <html data-theme>, not the OS, so the admin toggle and the
+   Telegram colorScheme both drive the same utilities. */
+@custom-variant dark (&:where([data-theme="dark"], [data-theme="dark"] *));
+
+/* ==========================================================================
+   VarNet — design tokens & Telegram theme bridge
+   --------------------------------------------------------------------------
+   Telegram clients inject `--tg-theme-*` custom properties on <html>; they
+   win over the values below. Here they are mapped to Tailwind theme tokens so
+   every screen can simply use `bg-tg-bg`, `text-tg-hint`, `bg-tg-button`, …
+   and adapt automatically to the user's Telegram theme.
+
+   Outside Telegram (desktop browser preview) the palette is selected by
+   `<html data-theme="light|dark">`, which is seeded by an inline bootstrap in
+   index.html and updated by the theme store (Telegram scheme or admin toggle).
+   ========================================================================== */
+
+:root {
+  color-scheme: light;
+
+  --tg-theme-bg-color: #ffffff;
+  --tg-theme-secondary-bg-color: #f1f1f4;
+  --tg-theme-text-color: #0f0f0f;
+  --tg-theme-hint-color: #707579;
+  --tg-theme-link-color: #2481cc;
+  --tg-theme-button-color: #2481cc;
+  --tg-theme-button-text-color: #ffffff;
+  --tg-theme-header-bg-color: #ffffff;
+  --tg-theme-accent-text-color: #2481cc;
+  --tg-theme-destructive-text-color: #e53935;
+  --tg-theme-section-bg-color: #ffffff;
+  --tg-theme-section-header-text-color: #2481cc;
+  --tg-theme-subtitle-text-color: #707579;
+  --tg-theme-section-separator-color: rgba(15, 15, 15, 0.08);
+}
+
+:root[data-theme="dark"] {
+  color-scheme: dark;
+
+  --tg-theme-bg-color: #17212b;
+  --tg-theme-secondary-bg-color: #232e3c;
+  --tg-theme-text-color: #f5f5f5;
+  --tg-theme-hint-color: #708499;
+  --tg-theme-link-color: #6ab3f3;
+  --tg-theme-button-color: #5288c1;
+  --tg-theme-button-text-color: #ffffff;
+  --tg-theme-header-bg-color: #17212b;
+  --tg-theme-accent-text-color: #6ab3f3;
+  --tg-theme-destructive-text-color: #ff453a;
+  --tg-theme-section-bg-color: #17212b;
+  --tg-theme-section-header-text-color: #6ab3f3;
+  --tg-theme-subtitle-text-color: #708499;
+  --tg-theme-section-separator-color: rgba(255, 255, 255, 0.08);
+}
+
+@theme {
+  /* Typography — Vazirmatn is the primary Persian UI typeface (see index.html).
+     Latin fallbacks keep technical strings (IDs, hostnames, prices) readable. */
+  --font-sans:
+    "Vazirmatn", "Vazirmatn FD", "SF Pro Text", -apple-system, BlinkMacSystemFont,
+    "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  --font-mono: "SF Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+
+  /* --- Telegram theme bridge ------------------------------------------- */
+  --color-tg-bg: var(--tg-theme-bg-color);
+  --color-tg-secondary-bg: var(--tg-theme-secondary-bg-color);
+  --color-tg-text: var(--tg-theme-text-color);
+  --color-tg-hint: var(--tg-theme-hint-color);
+  --color-tg-link: var(--tg-theme-link-color);
+  --color-tg-button: var(--tg-theme-button-color);
+  --color-tg-button-text: var(--tg-theme-button-text-color);
+  --color-tg-header-bg: var(--tg-theme-header-bg-color);
+  --color-tg-accent: var(--tg-theme-accent-text-color);
+  --color-tg-destructive: var(--tg-theme-destructive-text-color);
+  --color-tg-section: var(--tg-theme-section-bg-color);
+  --color-tg-section-header: var(--tg-theme-section-header-text-color);
+  --color-tg-subtitle: var(--tg-theme-subtitle-text-color);
+  --color-tg-separator: var(--tg-theme-section-separator-color);
+
+  /* --- Brand palette (Telegram blue family) ---------------------------- */
+  --color-brand-50: #eef8ff;
+  --color-brand-100: #d8efff;
+  --color-brand-200: #b9e4ff;
+  --color-brand-300: #89d5ff;
+  --color-brand-400: #52bfff;
+  --color-brand-500: #2aabee;
+  --color-brand-600: #229ed9;
+  --color-brand-700: #1c86bc;
+  --color-brand-800: #1d6f99;
+  --color-brand-900: #1d5d7f;
+  --color-brand-950: #123b52;
+
+  --radius-tg: 0.875rem;
+
+  --animate-fade-in: fade-in 0.25s ease-out both;
+  --animate-slide-up: slide-up 0.3s cubic-bezier(0.22, 1, 0.36, 1) both;
+  --animate-pulse-soft: pulse-soft 2.4s ease-in-out infinite;
+
+  @keyframes fade-in {
+    from {
+      opacity: 0;
+    }
+    to {
+      opacity: 1;
+    }
+  }
+
+  @keyframes slide-up {
+    from {
+      opacity: 0;
+      transform: translateY(1rem);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0);
+    }
+  }
+
+  @keyframes pulse-soft {
+    0%,
+    100% {
+      opacity: 1;
+    }
+    50% {
+      opacity: 0.55;
+    }
+  }
+}
+
+@layer base {
+  * {
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  html {
+    -webkit-text-size-adjust: 100%;
+    text-rendering: optimizeLegibility;
+    /* RTL document direction is also set on <html dir="rtl">; this keeps the
+       root direction correct even if the attribute is stripped by a proxy. */
+    direction: rtl;
+  }
+
+  body {
+    @apply bg-tg-secondary-bg font-sans text-tg-text antialiased;
+    direction: rtl;
+    text-align: start;
+    min-height: 100dvh;
+    overscroll-behavior-y: none;
+  }
+
+  /* Persian script must not be letter-spaced (it breaks glyph joining).
+     `!important` also neutralises any leftover `tracking-*` utility on
+     translated copy; Latin technical snippets are unaffected visually. */
+  :where(p, span, h1, h2, h3, h4, h5, h6, button, a, li, label, td, th) {
+    letter-spacing: normal !important;
+  }
+
+  #root {
+    min-height: 100dvh;
+  }
+
+  input,
+  button,
+  textarea,
+  select {
+    font: inherit;
+  }
+
+  ::selection {
+    background-color: color-mix(in srgb, var(--color-brand-500) 30%, transparent);
+  }
+
+  :focus-visible {
+    outline: 2px solid var(--color-brand-500);
+    outline-offset: 2px;
+  }
+
+  ::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+  }
+
+  ::-webkit-scrollbar-track {
+    background: transparent;
+  }
+
+  ::-webkit-scrollbar-thumb {
+    border-radius: 9999px;
+    background-color: color-mix(in srgb, var(--tg-theme-hint-color) 35%, transparent);
+  }
+}
+
+/* -------------------------------------------------------------------------- */
+/* Custom utilities                                                           */
+/* -------------------------------------------------------------------------- */
+
+/** Horizontal scrollers without a visible scrollbar (category chips). */
+@utility no-scrollbar {
+  scrollbar-width: none;
+
+  &::-webkit-scrollbar {
+    display: none;
+  }
+}
+
+/** Respect the iPhone home-indicator area for bottom navigation. */
+@utility safe-bottom {
+  padding-bottom: calc(env(safe-area-inset-bottom, 0px) + 0.5rem);
+}
+
+@utility safe-top {
+  padding-top: env(safe-area-inset-top, 0px);
+}
+
+/** Bidi-safe container for Latin-only content inside the RTL flow
+ *  (hostnames, IPs, order IDs, Telegram usernames). */
+@utility bidi-ltr {
+  direction: ltr;
+  unicode-bidi: isolate;
+}
+
+/* -------------------------------------------------------------------------- */
+/* Shared layout classes                                                      */
+/* -------------------------------------------------------------------------- */
+
+@layer components {
+  /** Mobile-first Mini App page container (max 480px, clears bottom nav). */
+  .tg-page {
+    @apply mx-auto w-full max-w-[480px] px-4 pb-28;
+  }
+
+  /** Small uppercase section label used above card groups. */
+  .tg-section-title {
+    @apply mb-2 px-1 text-[13px] font-semibold tracking-wide text-tg-hint;
+  }
+}

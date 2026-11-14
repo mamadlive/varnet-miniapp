@@ -1,0 +1,622 @@
+import { useCallback, useEffect, useMemo, useState } from 'react'
+import {
+  CheckCircle2,
+  CircleAlert,
+  CloudDownload,
+  MoreHorizontal,
+  Package,
+  Pencil,
+  RefreshCw,
+  Search,
+  SlidersHorizontal,
+} from 'lucide-react'
+import { AdminErrorState } from '@/components/admin/AdminStates'
+import { AdminPageHeader } from '@/components/admin/AdminPageHeader'
+import { DataTable } from '@/components/admin/AdminTable'
+import type { DataTableColumn } from '@/components/admin/AdminTable'
+import { FilterChips } from '@/components/admin/FilterChips'
+import type { FilterChipOption } from '@/components/admin/FilterChips'
+import { CategoryBadge } from '@/components/admin/StatusBadges'
+import { Badge } from '@/components/ui/Badge'
+import { Button } from '@/components/ui/Button'
+import { EmptyState } from '@/components/ui/EmptyState'
+import { Input } from '@/components/ui/Input'
+import { Sheet } from '@/components/ui/Sheet'
+import { Switch } from '@/components/ui/Switch'
+import { applyProfitMargin, hasMargin } from '@/lib/pricing'
+import { cn } from '@/lib/utils'
+import { formatCount, formatCurrency } from '@/lib/format'
+import { fa } from '@/lib/i18n'
+import { isApiError } from '@/services/apiClient'
+import { listAccountProducts, syncAccountProducts } from '@/services/accounts.service'
+import { useAdminStore } from '@/store/adminStore'
+import type { AccountProduct, DiscountType, ProductCategory } from '@/types'
+
+const MAX_FIXED_MARGIN = 50_000_000
+
+type CategoryFilter = ProductCategory | 'all'
+
+const CATEGORY_FILTER_OPTIONS: FilterChipOption<CategoryFilter>[] = [
+  { value: 'all', label: 'همه محصولات' },
+  { value: 'streaming', label: fa.categories.streaming },
+  { value: 'ai', label: fa.categories.ai },
+  { value: 'gaming', label: fa.categories.gaming },
+  { value: 'design', label: fa.categories.design },
+  { value: 'social', label: fa.categories.social },
+  { value: 'other', label: fa.categories.other },
+]
+
+export default function ProductsPage() {
+  const [products, setProducts] = useState<AccountProduct[]>([])
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
+  const [query, setQuery] = useState('')
+  const [category, setCategory] = useState<CategoryFilter>('all')
+  const [statusOverrides, setStatusOverrides] = useState<Record<string, boolean>>({})
+  const [syncing, setSyncing] = useState(false)
+  const [syncNotice, setSyncNotice] = useState<{
+    tone: 'success'
+    message: string
+  } | null>(null)
+  const [syncError, setSyncError] = useState<string | null>(null)
+
+  const margins = useAdminStore((state) => state.margins)
+  const setMargin = useAdminStore((state) => state.setMargin)
+  const [marginProduct, setMarginProduct] = useState<AccountProduct | null>(null)
+  const [marginType, setMarginType] = useState<DiscountType>('percent')
+  const [marginValue, setMarginValue] = useState('')
+  const [marginError, setMarginError] = useState<string | null>(null)
+
+  const basePriceOf = (product: AccountProduct): number => product.basePrice ?? product.price
+  const finalPriceOf = (product: AccountProduct): number =>
+    applyProfitMargin(basePriceOf(product), margins[product.id])
+
+  const openMarginEditor = (product: AccountProduct) => {
+    const rule = margins[product.id]
+    setMarginProduct(product)
+    setMarginType(rule?.type ?? 'percent')
+    setMarginValue(rule ? String(rule.value) : '')
+    setMarginError(null)
+  }
+
+  const closeMarginEditor = () => {
+    setMarginProduct(null)
+    setMarginValue('')
+    setMarginError(null)
+  }
+
+  const handleSaveMargin = () => {
+    if (!marginProduct) return
+    const value = Number(marginValue)
+    if (!Number.isFinite(value) || value < 0) {
+      setMarginError('یک مقدار معتبر وارد کنید.')
+      return
+    }
+    if (marginType === 'percent' && value > 200) {
+      setMarginError('درصد حاشیه سود نمی‌تواند بیشتر از ۲۰۰ باشد.')
+      return
+    }
+    if (marginType === 'fixed' && value > MAX_FIXED_MARGIN) {
+      setMarginError(`حاشیه ثابت نمی‌تواند بیشتر از ${formatCurrency(MAX_FIXED_MARGIN)} باشد.`)
+      return
+    }
+    setMargin(
+      marginProduct.id,
+      value > 0 ? { type: marginType, value: Math.round(value) } : null,
+    )
+    closeMarginEditor()
+  }
+
+  const marginPreviewBase = marginProduct ? basePriceOf(marginProduct) : 0
+  const marginPreviewValue = Number(marginValue)
+  const marginPreview =
+    marginProduct && Number.isFinite(marginPreviewValue) && marginPreviewValue > 0
+      ? applyProfitMargin(marginPreviewBase, {
+          type: marginType,
+          value: Math.round(marginPreviewValue),
+        })
+      : marginPreviewBase
+
+  const load = useCallback(async () => {
+    try {
+      setProducts(await listAccountProducts())
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'بارگیری محصولات ممکن نشد.')
+    } finally {
+      setLoading(false)
+    }
+  }, [])
+
+  const refresh = useCallback(() => {
+    setError(null)
+    setLoading(true)
+    void load()
+  }, [load])
+
+  useEffect(() => {
+    if (!syncNotice) return
+    const timer = window.setTimeout(() => setSyncNotice(null), 5000)
+    return () => window.clearTimeout(timer)
+  }, [syncNotice])
+
+  const handleSync = async () => {
+    setSyncing(true)
+    setError(null)
+    setSyncNotice(null)
+    setSyncError(null)
+
+    try {
+      const result = await syncAccountProducts()
+      setProducts(await listAccountProducts())
+
+      const skippedNote =
+        result.skipped > 0
+          ? ` (${formatCount(result.skipped)} رکورد نامعتبر نادیده گرفته شد)`
+          : ''
+      setSyncNotice({
+        tone: 'success',
+        message: `${formatCount(result.products.length)} محصول از ارائه‌دهنده همگام‌سازی شد${skippedNote}.`,
+      })
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'همگام‌سازی محصولات ممکن نشد.'
+      setSyncError(isApiError(err) && err.code ? `${message} (${err.code})` : message)
+    } finally {
+      setSyncing(false)
+    }
+  }
+
+  useEffect(() => {
+    let cancelled = false
+    const run = async () => {
+      try {
+        const data = await listAccountProducts()
+        if (!cancelled) setProducts(data)
+      } catch (err) {
+        if (!cancelled) setError(err instanceof Error ? err.message : 'بارگیری محصولات ممکن نشد.')
+      } finally {
+        if (!cancelled) setLoading(false)
+      }
+    }
+    void run()
+    return () => {
+      cancelled = true
+    }
+  }, [])
+
+  const categoryOptions = useMemo(
+    () =>
+      CATEGORY_FILTER_OPTIONS.map((option) => ({
+        ...option,
+        count:
+          option.value === 'all'
+            ? products.length
+            : products.filter((product) => product.category === option.value).length,
+      })),
+    [products],
+  )
+
+  const filteredProducts = useMemo(() => {
+    const needle = query.trim().toLowerCase()
+    return products.filter((product) => {
+      if (category !== 'all' && product.category !== category) return false
+      if (!needle) return true
+      return `${product.title} ${product.subtitle ?? ''}`.toLowerCase().includes(needle)
+    })
+  }, [category, products, query])
+
+  const isActive = (product: AccountProduct): boolean =>
+    statusOverrides[product.id] ?? product.stock > 0
+
+  const activeCount = products.filter((product) => isActive(product)).length
+  const marginCount = products.filter((product) => hasMargin(margins[product.id])).length
+  const hasFilters = category !== 'all' || query.trim().length > 0
+
+  const columns: DataTableColumn<AccountProduct>[] = [
+    {
+      key: 'product',
+      header: 'محصول',
+      render: (product) => (
+        <div className="flex items-center gap-3">
+          <span
+            className={cn(
+              'flex size-10 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br text-lg shadow-sm ring-1 ring-black/5',
+              product.gradient ?? 'from-brand-500 to-brand-700',
+            )}
+            aria-hidden
+          >
+            {product.emoji ?? '🛍️'}
+          </span>
+          <div className="min-w-0">
+            <p className="truncate text-[13px] font-medium text-tg-text">{product.title}</p>
+            <p className="truncate text-[11.5px] text-tg-hint">
+              {product.subtitle ?? <span className="bidi-ltr">{product.id}</span>}
+            </p>
+          </div>
+        </div>
+      ),
+    },
+    {
+      key: 'category',
+      header: 'دسته‌بندی',
+      render: (product) => <CategoryBadge category={product.category} />,
+    },
+    {
+      key: 'price',
+      header: 'قیمت نهایی',
+      align: 'right',
+      render: (product) => {
+        const basePrice = basePriceOf(product)
+        const finalPrice = finalPriceOf(product)
+        return (
+          <div>
+            <p className="text-[13px] font-semibold tabular-nums text-tg-text">
+              {formatCurrency(finalPrice, product.currency)}
+            </p>
+            {hasMargin(margins[product.id]) ? (
+              <p className="text-[11px] tabular-nums text-tg-hint">
+                پایه {formatCurrency(basePrice, product.currency)}
+              </p>
+            ) : null}
+          </div>
+        )
+      },
+    },
+    {
+      key: 'margin',
+      header: 'حاشیه سود',
+      render: (product) => {
+        const rule = margins[product.id]
+        return (
+          <div className="flex items-center gap-2">
+            {hasMargin(rule) ? (
+              <Badge tone="success" size="sm">
+                {rule.type === 'percent'
+                  ? `+${formatCount(rule.value)}٪`
+                  : `+${formatCurrency(rule.value)}`}
+              </Badge>
+            ) : (
+              <span className="text-[11.5px] text-tg-hint">بدون حاشیه</span>
+            )}
+            <Button
+              variant="ghost"
+              size="icon"
+              className="size-7 rounded-lg"
+              aria-label={`تعیین حاشیه سود ${product.title}`}
+              onClick={() => openMarginEditor(product)}
+            >
+              <SlidersHorizontal className="size-3.5" aria-hidden />
+            </Button>
+          </div>
+        )
+      },
+    },
+    {
+      key: 'stock',
+      header: 'موجودی',
+      render: (product) => (
+        <div>
+          <p
+            className={cn(
+              'text-[12.5px] font-semibold tabular-nums',
+              product.stock === 0
+                ? 'text-rose-600'
+                : product.stock <= 10
+                  ? 'text-amber-600'
+                  : 'text-tg-text',
+            )}
+          >
+            {formatCount(product.stock)}
+          </p>
+          <p className="text-[11px] text-tg-hint">
+            {product.stock === 0 ? 'ناموجود' : 'موجود'}
+          </p>
+        </div>
+      ),
+    },
+    {
+      key: 'status',
+      header: 'وضعیت',
+      render: (product) => {
+        const active = isActive(product)
+        return (
+          <div className="flex items-center gap-2">
+            <Switch
+              checked={active}
+              label={`${active ? 'توقف' : 'فعال‌سازی'} ${product.title}`}
+              onCheckedChange={() =>
+                setStatusOverrides((previous) => ({ ...previous, [product.id]: !active }))
+              }
+            />
+            <span
+              className={cn(
+                'text-[12px] font-medium',
+                active ? 'text-tg-text' : 'text-tg-hint',
+              )}
+            >
+              {active ? 'فعال' : 'متوقف'}
+            </span>
+          </div>
+        )
+      },
+    },
+    {
+      key: 'actions',
+      header: 'اقدامات',
+      align: 'right',
+      render: (product) => (
+        <div className="flex items-center justify-end gap-1">
+          <Button
+            variant="ghost"
+            size="icon"
+            className="size-8 rounded-lg"
+            aria-label={`ویرایش حاشیه سود ${product.title}`}
+            onClick={() => openMarginEditor(product)}
+          >
+            <Pencil className="size-3.5" aria-hidden />
+          </Button>
+          <Button
+            variant="ghost"
+            size="icon"
+            className="size-8 rounded-lg"
+            aria-label={`اقدامات بیشتر برای ${product.title}`}
+          >
+            <MoreHorizontal className="size-4" aria-hidden />
+          </Button>
+        </div>
+      ),
+    },
+  ]
+
+  const clearFilters = () => {
+    setQuery('')
+    setCategory('all')
+  }
+
+  return (
+    <div className="space-y-6">
+      <AdminPageHeader
+        eyebrow="کاتالوگ"
+        title="محصولات اکانت"
+        description="اکانت‌ها و اشتراک‌های دیجیتال قابل فروش در مینی‌اپ. قیمت پایه از طریق پروکسی امن کلادفلر از ارائه‌دهنده خوانده می‌شود (کلید API فقط سمت سرور است) و حاشیه سود شما روی آن اعمال می‌شود."
+        meta={
+          <Badge tone="brand" size="sm">
+            {formatCount(products.length)} محصول
+          </Badge>
+        }
+        actions={
+          <div className="flex flex-wrap items-center gap-2">
+            <Button
+              size="sm"
+              leftIcon={<CloudDownload className="size-4" />}
+              loading={syncing}
+              onClick={() => void handleSync()}
+            >
+              همگام‌سازی محصولات
+            </Button>
+            <Button
+              variant="secondary"
+              size="sm"
+              leftIcon={<RefreshCw className="size-4" />}
+              loading={loading}
+              onClick={refresh}
+            >
+              {fa.common.refresh}
+            </Button>
+          </div>
+        }
+      />
+
+      {syncNotice ? (
+        <div
+          role="status"
+          className="flex items-start gap-3 rounded-xl border border-emerald-500/30 bg-emerald-500/10 px-4 py-3 text-[12.5px] leading-relaxed text-emerald-700"
+        >
+          <CheckCircle2 className="mt-0.5 size-4 shrink-0" aria-hidden />
+          <p>{syncNotice.message}</p>
+        </div>
+      ) : null}
+
+      {syncError ? (
+        <div
+          role="alert"
+          className="flex items-start gap-3 rounded-xl border border-rose-500/30 bg-rose-500/10 px-4 py-3 text-[12.5px] leading-relaxed text-rose-700"
+        >
+          <CircleAlert className="mt-0.5 size-4 shrink-0" aria-hidden />
+          <p>{syncError}</p>
+        </div>
+      ) : null}
+
+      {error ? (
+        <AdminErrorState message={error} onRetry={refresh} />
+      ) : (
+        <>
+          <div className="flex flex-wrap items-center gap-2 text-[12px] text-tg-hint">
+            <span>{formatCount(activeCount)} فعال</span>
+            <span className="text-tg-hint/50">·</span>
+            <span>{formatCount(products.length - activeCount)} متوقف</span>
+            <span className="text-tg-hint/50">·</span>
+            <span>{formatCount(marginCount)} با حاشیه سود</span>
+            <span className="text-tg-hint/50">·</span>
+            <span>{formatCount(filteredProducts.length)} نمایش</span>
+          </div>
+
+          <DataTable<AccountProduct>
+            columns={columns}
+            rows={filteredProducts}
+            rowKey={(product) => product.id}
+            loading={loading && products.length === 0}
+            skeletonRows={6}
+            minWidthClassName="min-w-[900px]"
+            header={
+              <div className="space-y-3">
+                <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                  <div>
+                    <h2 className="text-[15px] font-semibold text-tg-text">کاتالوگ محصولات</h2>
+                    <p className="mt-0.5 text-[12px] text-tg-hint">
+                      نمایش {formatCount(filteredProducts.length)} از {formatCount(products.length)}{' '}
+                      محصول
+                    </p>
+                  </div>
+                  <div className="w-full sm:w-72">
+                    <Input
+                      icon={Search}
+                      placeholder="جستجوی محصولات…"
+                      aria-label="جستجوی محصولات"
+                      value={query}
+                      onChange={(event) => setQuery(event.target.value)}
+                    />
+                  </div>
+                </div>
+                <FilterChips
+                  options={categoryOptions}
+                  value={category}
+                  onChange={setCategory}
+                  label="فیلتر محصولات بر اساس دسته‌بندی"
+                />
+              </div>
+            }
+            empty={
+              <EmptyState
+                icon={Package}
+                title={hasFilters ? 'محصولی با این فیلترها پیدا نشد' : 'هنوز محصولی ثبت نشده'}
+                description={
+                  hasFilters
+                    ? 'دسته‌بندی یا عبارت جستجوی دیگری را امتحان کنید یا فیلترها را پاک کنید تا کل کاتالوگ نمایش داده شود.'
+                    : 'اولین محصول اکانت را اضافه کنید تا فروش در مینی‌اپ آغاز شود.'
+                }
+                action={
+                  hasFilters ? (
+                    <Button variant="secondary" size="sm" onClick={clearFilters}>
+                      پاک کردن فیلترها
+                    </Button>
+                  ) : undefined
+                }
+                className="py-8"
+              />
+            }
+          />
+        </>
+      )}
+
+      <Sheet
+        open={marginProduct !== null}
+        onClose={closeMarginEditor}
+        title="حاشیه سود"
+        description={
+          marginProduct
+            ? `قیمت پایه «${marginProduct.title}» از ارائه‌دهنده خوانده می‌شود و این حاشیه روی آن اضافه می‌شود.`
+            : undefined
+        }
+        className="sm:max-w-md"
+        footer={
+          <div className="space-y-2">
+            <div className="flex gap-2">
+              <Button className="flex-1" onClick={handleSaveMargin}>
+                ذخیره حاشیه
+              </Button>
+              <Button variant="secondary" onClick={closeMarginEditor}>
+                انصراف
+              </Button>
+            </div>
+            {marginProduct && hasMargin(margins[marginProduct.id]) ? (
+              <Button
+                variant="ghost"
+                fullWidth
+                className="text-tg-destructive"
+                onClick={() => {
+                  setMargin(marginProduct.id, null)
+                  closeMarginEditor()
+                }}
+              >
+                حذف حاشیه سود
+              </Button>
+            ) : null}
+          </div>
+        }
+      >
+        <div className="space-y-3">
+          <div>
+            <p className="mb-1.5 text-[13px] font-medium text-tg-hint">نوع حاشیه</p>
+            <div className="grid grid-cols-2 gap-2" role="group" aria-label="نوع حاشیه سود">
+              {(
+                [
+                  { value: 'percent', label: 'درصدی (٪)' },
+                  { value: 'fixed', label: 'مبلغ ثابت (تومان)' },
+                ] as const
+              ).map((option) => {
+                const active = marginType === option.value
+                return (
+                  <button
+                    key={option.value}
+                    type="button"
+                    aria-pressed={active}
+                    onClick={() => {
+                      setMarginType(option.value)
+                      setMarginError(null)
+                    }}
+                    className={cn(
+                      'h-10 rounded-xl border text-[12.5px] font-medium transition-colors',
+                      active
+                        ? 'border-brand-500 bg-brand-500/10 text-brand-600'
+                        : 'border-tg-separator bg-tg-bg text-tg-text hover:bg-tg-secondary-bg',
+                    )}
+                  >
+                    {option.label}
+                  </button>
+                )
+              })}
+            </div>
+          </div>
+
+          <Input
+            label={marginType === 'percent' ? 'درصد سود' : 'مبلغ سود'}
+            type="number"
+            inputMode="numeric"
+            min={0}
+            max={marginType === 'percent' ? 200 : MAX_FIXED_MARGIN}
+            value={marginValue}
+            onChange={(event) => {
+              setMarginValue(event.target.value)
+              setMarginError(null)
+            }}
+            placeholder={marginType === 'percent' ? 'مثلاً ۲۰' : 'مثلاً ۵۰۰۰۰'}
+            trailing={
+              <span className="shrink-0 text-[12px] font-medium text-tg-hint">
+                {marginType === 'percent' ? '٪' : 'تومان'}
+              </span>
+            }
+            error={marginError ?? undefined}
+          />
+
+          <div className="space-y-1.5 rounded-xl border border-tg-separator bg-tg-secondary-bg/60 p-3 text-[12.5px]">
+            <div className="flex items-center justify-between gap-3">
+              <span className="text-tg-hint">قیمت پایه ارائه‌دهنده</span>
+              <span className="tabular-nums text-tg-text">
+                {formatCurrency(marginPreviewBase, marginProduct?.currency ?? 'IRT')}
+              </span>
+            </div>
+            <div className="flex items-center justify-between gap-3">
+              <span className="font-medium text-tg-text">قیمت نهایی در مینی‌اپ</span>
+              <span className="font-bold tabular-nums text-tg-text">
+                {formatCurrency(marginPreview, marginProduct?.currency ?? 'IRT')}
+              </span>
+            </div>
+            {marginPreview > marginPreviewBase ? (
+              <div className="flex items-center justify-between gap-3 text-emerald-600">
+                <span>سود هر فروش</span>
+                <span className="font-medium tabular-nums">
+                  +{formatCurrency(marginPreview - marginPreviewBase, marginProduct?.currency ?? 'IRT')}
+                </span>
+              </div>
+            ) : null}
+          </div>
+
+          <p className="text-[11.5px] leading-relaxed text-tg-hint">
+            با ذخیره ۰ حاشیه حذف می‌شود. قیمت نمایش‌داده‌شده به نزدیک‌ترین هزار تومان گرد
+            می‌شود.
+          </p>
+        </div>
+      </Sheet>
+    </div>
+  )
+}

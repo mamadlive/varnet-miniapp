@@ -1,0 +1,23 @@
+# ---------------------------------------------------------------------------
+# Local secrets for Cloudflare Pages Functions (`npm run dev:pages`).
+# Copy this file to `.dev.vars` in the project root — never commit `.dev.vars`.
+# In production, set the same keys in the Pages dashboard instead:
+#   Settings → Environment variables → add `ACCOUNTS_PROVIDER_API_KEY` as a secret.
+# ---------------------------------------------------------------------------
+
+# ── REQUIRED ────────────────────────────────────────────────────────────────
+# Place the provider's real API key immediately after the equals sign.
+# Do not wrap it in quotes and do not leave spaces around `=`.
+# Example shape only: ACCOUNTS_PROVIDER_API_KEY=sk_live_xxxxxxxxxxxxxxxx
+# The key is read only inside functions/api/provider/products.ts and sent
+# upstream as `Authorization: Bearer ...`; it is never exposed to the browser.
+ACCOUNTS_PROVIDER_API_KEY=
+
+# ── OPTIONAL ────────────────────────────────────────────────────────────────
+# Override the provider catalogue endpoint (must start with https://).
+# Defaults to the placeholder https://api.dummy-provider.com/v1/products.
+ACCOUNTS_PROVIDER_BASE_URL=
+
+# Dantehub prices the catalogue in USDT. This rate converts each price to Toman.
+# Leave empty to use the built-in default of 70000 Toman per USDT.
+USDT_RATE_TOMAN=
