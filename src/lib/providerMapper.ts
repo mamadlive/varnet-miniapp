@@ -101,7 +101,7 @@ interface BrandRule {
 const BRANDS: BrandRule[] = [
   /* ------------------------------- Streaming ------------------------------ */
   {
-    aliases: ['netflix'],
+    aliases: ['netflix', 'نتفلیکس'],
     key: 'netflix',
     name: 'نتفلیکس',
     category: 'streaming',
@@ -110,7 +110,7 @@ const BRANDS: BrandRule[] = [
     blurb: 'پخش فیلم و سریال با کیفیت ۴K روی تلویزیون، موبایل و مرورگر.',
   },
   {
-    aliases: ['spotify'],
+    aliases: ['spotify', 'اسپاتیفای'],
     key: 'spotify',
     name: 'اسپاتیفای',
     tier: 'پریمیوم',
@@ -120,7 +120,7 @@ const BRANDS: BrandRule[] = [
     blurb: 'پخش موسیقی و پادکست بدون تبلیغ همراه با دانلود آفلاین.',
   },
   {
-    aliases: ['youtube premium', 'youtube red'],
+    aliases: ['youtube premium', 'youtube red', 'یوتیوب پریمیوم'],
     key: 'youtube-premium',
     name: 'یوتیوب پریمیوم',
     category: 'streaming',
@@ -129,21 +129,21 @@ const BRANDS: BrandRule[] = [
     blurb: 'تماشای یوتیوب بدون تبلیغ با پخش پس‌زمینه و دانلود آفلاین.',
   },
   {
-    aliases: ['youtube music'],
+    aliases: ['youtube music', 'یوتیوب موزیک'],
     name: 'یوتیوب موزیک',
     category: 'streaming',
     emoji: '🎵',
     blurb: 'پخش موسیقی و پادکست یوتیوب بدون تبلیغ.',
   },
   {
-    aliases: ['youtube'],
+    aliases: ['youtube', 'یوتیوب'],
     name: 'یوتیوب',
     category: 'streaming',
     emoji: '▶️',
     blurb: 'تماشای ویدیوهای یوتیوب بدون تبلیغ با پخش پس‌زمینه.',
   },
   {
-    aliases: ['disney plus', 'disney+', 'disney'],
+    aliases: ['disney plus', 'disney+', 'disney', 'دیزنی پلاس'],
     key: 'disney-plus',
     name: 'دیزنی پلاس',
     category: 'streaming',
@@ -152,7 +152,7 @@ const BRANDS: BrandRule[] = [
     blurb: 'فیلم‌ها و سریال‌های دیزنی، پیکسار، مارول و استار وارز.',
   },
   {
-    aliases: ['amazon prime', 'prime video'],
+    aliases: ['amazon prime', 'prime video', 'amazon', 'آمازون پرایم', 'آمازون'],
     name: 'آمازون پرایم',
     category: 'streaming',
     emoji: '📦',
@@ -160,7 +160,7 @@ const BRANDS: BrandRule[] = [
     blurb: 'اشتراک آمازون شامل پرایم ویدیو، موزیک و ارسال رایگان.',
   },
   {
-    aliases: ['hbo max', 'hbo'],
+    aliases: ['hbo max', 'hbo', 'اچ‌بی‌او مکس', 'اچ بی او مکس'],
     name: 'اچ‌بی‌او مکس',
     category: 'streaming',
     emoji: '🎭',
@@ -168,7 +168,7 @@ const BRANDS: BrandRule[] = [
     blurb: 'سریال‌ها و فیلم‌های اچ‌بی‌او و برادران وارنر.',
   },
   {
-    aliases: ['paramount plus', 'paramount+', 'paramount'],
+    aliases: ['paramount plus', 'paramount+', 'paramount', 'پارامونت پلاس'],
     name: 'پارامونت پلاس',
     category: 'streaming',
     emoji: '⛰️',
@@ -183,21 +183,28 @@ const BRANDS: BrandRule[] = [
     blurb: 'تماشای انیمه و سریال‌های ژاپنی با زیرنویس.',
   },
   {
-    aliases: ['apple tv plus', 'apple tv+', 'apple tv'],
+    aliases: ['apple tv plus', 'apple tv+', 'apple tv', 'اپل تی‌وی'],
     name: 'اپل تی‌وی',
     category: 'streaming',
     emoji: '🍎',
     blurb: 'سریال‌ها و فیلم‌های اختصاصی اپل تی‌وی پلاس.',
   },
   {
-    aliases: ['apple music'],
+    aliases: ['apple music', 'اپل موزیک'],
     name: 'اپل موزیک',
     category: 'streaming',
     emoji: '🎵',
     blurb: 'استریم موسیقی بدون تبلیغ با کیفیت Lossless و Spatial Audio.',
   },
   {
-    aliases: ['hulu'],
+    aliases: ['apple', 'اپل'],
+    name: 'اپل',
+    category: 'other',
+    emoji: '🍎',
+    blurb: 'دسترسی به سرویس‌ها و محصولات دیجیتال اپل.',
+  },
+  {
+    aliases: ['hulu', 'هولو'],
     name: 'هولو',
     category: 'streaming',
     emoji: '💚',
@@ -382,7 +389,7 @@ const BRANDS: BrandRule[] = [
 
   /* ----------------------------- Artificial AI ---------------------------- */
   {
-    aliases: ['chatgpt', 'chat gpt', 'gpt plus', 'openai'],
+    aliases: ['chatgpt', 'chat gpt', 'gpt plus', 'openai', 'چت‌جی‌پی‌تی', 'چت جی پی تی'],
     key: 'chatgpt',
     name: 'چت‌جی‌پی‌تی',
     tier: 'پلاس',
@@ -392,7 +399,7 @@ const BRANDS: BrandRule[] = [
     blurb: 'اشتراک پرمیوم هوش مصنوعی برای تولید متن و کد و پاسخ به پرسش‌ها.',
   },
   {
-    aliases: ['claude', 'anthropic'],
+    aliases: ['claude', 'anthropic', 'کلود'],
     key: 'claude',
     name: 'کلود',
     category: 'ai',
@@ -401,7 +408,7 @@ const BRANDS: BrandRule[] = [
     blurb: 'دستیار هوش مصنوعی برای نوشتن، برنامه‌نویسی و تحلیل اسناد طولانی.',
   },
   {
-    aliases: ['gemini', 'google ai', 'bard'],
+    aliases: ['gemini', 'google ai', 'bard', 'جمینای'],
     name: 'جمینای',
     category: 'ai',
     emoji: '♊',
@@ -409,7 +416,7 @@ const BRANDS: BrandRule[] = [
     blurb: 'دستیار هوش مصنوعی گوگل با دسترسی به مدل‌های Gemini.',
   },
   {
-    aliases: ['grok', 'xai', 'x.ai'],
+    aliases: ['grok', 'xai', 'x.ai', 'گروک'],
     name: 'گروک',
     category: 'ai',
     emoji: '🚀',
@@ -431,14 +438,14 @@ const BRANDS: BrandRule[] = [
     blurb: 'تکمیل کد و برنامه‌نویسی با هوش مصنوعی داخل ادیتور.',
   },
   {
-    aliases: ['perplexity'],
+    aliases: ['perplexity', 'پرپلکسیتی'],
     name: 'پرپلکسیتی',
     category: 'ai',
     emoji: '🔎',
     blurb: 'موتور جستجوی هوشمند با پاسخ‌های مستند و منابع معتبر.',
   },
   {
-    aliases: ['deepseek', 'deep seek'],
+    aliases: ['deepseek', 'deep seek', 'دیپ‌سیک', 'دیپ سیک'],
     name: 'دیپ‌سیک',
     category: 'ai',
     emoji: '🐋',
@@ -495,7 +502,7 @@ const BRANDS: BrandRule[] = [
     blurb: 'بازنویسی، خلاصه‌سازی و بررسی متن.',
   },
   {
-    aliases: ['midjourney'],
+    aliases: ['midjourney', 'میدجرنی'],
     name: 'میدجرنی',
     category: 'ai',
     emoji: '🎨',
@@ -610,7 +617,7 @@ const BRANDS: BrandRule[] = [
 
   /* --------------------------------- Design ------------------------------- */
   {
-    aliases: ['adobe creative cloud', 'creative cloud', 'adobe'],
+    aliases: ['adobe creative cloud', 'creative cloud', 'adobe', 'ادوبی کریتیو کلود', 'ادوبی'],
     key: 'adobe-cc',
     name: 'ادوبی کریتیو کلود',
     category: 'design',
@@ -619,7 +626,7 @@ const BRANDS: BrandRule[] = [
     blurb: 'نرم‌افزار قدرتمند طراحی و گرافیک شامل فتوشاپ، ایلاستریتور و پریمیر.',
   },
   {
-    aliases: ['adobe photoshop', 'photoshop'],
+    aliases: ['adobe photoshop', 'photoshop', 'ادوبی فتوشاپ'],
     name: 'ادوبی فتوشاپ',
     category: 'design',
     emoji: '🖌️',
@@ -627,7 +634,7 @@ const BRANDS: BrandRule[] = [
     blurb: 'ویرایش و روتوش تصویر و ساخت طرح‌های گرافیکی.',
   },
   {
-    aliases: ['adobe illustrator', 'illustrator'],
+    aliases: ['adobe illustrator', 'illustrator', 'ادوبی ایلاستریتور'],
     name: 'ادوبی ایلاستریتور',
     category: 'design',
     emoji: '✒️',
@@ -635,7 +642,7 @@ const BRANDS: BrandRule[] = [
     blurb: 'طراحی وکتور، لوگو و تصویرسازی حرفه‌ای.',
   },
   {
-    aliases: ['adobe premiere', 'premiere pro', 'premiere'],
+    aliases: ['adobe premiere', 'premiere pro', 'premiere', 'ادوبی پریمیر'],
     name: 'ادوبی پریمیر',
     category: 'design',
     emoji: '🎬',
@@ -643,7 +650,7 @@ const BRANDS: BrandRule[] = [
     blurb: 'تدوین ویدیو حرفه‌ای برای فیلم و شبکه‌های اجتماعی.',
   },
   {
-    aliases: ['adobe after effects', 'after effects'],
+    aliases: ['adobe after effects', 'after effects', 'ادوبی افترافکت'],
     name: 'ادوبی افترافکت',
     category: 'design',
     emoji: '🎞️',
@@ -651,28 +658,28 @@ const BRANDS: BrandRule[] = [
     blurb: 'ساخت موشن‌گرافیک و جلوه‌های ویژه ویدیو.',
   },
   {
-    aliases: ['adobe lightroom', 'lightroom'],
+    aliases: ['adobe lightroom', 'lightroom', 'ادوبی لایتروم'],
     name: 'ادوبی لایتروم',
     category: 'design',
     emoji: '📷',
     blurb: 'ویرایش، روتوش و مدیریت عکس‌های حرفه‌ای.',
   },
   {
-    aliases: ['adobe acrobat', 'acrobat'],
+    aliases: ['adobe acrobat', 'acrobat', 'ادوبی آکروبات'],
     name: 'ادوبی آکروبات',
     category: 'design',
     emoji: '📄',
     blurb: 'ویرایش، امضای دیجیتال و مدیریت فایل‌های PDF.',
   },
   {
-    aliases: ['adobe indesign', 'indesign'],
+    aliases: ['adobe indesign', 'indesign', 'ادوبی ایندیزاین'],
     name: 'ادوبی ایندیزاین',
     category: 'design',
     emoji: '📐',
     blurb: 'صفحه‌آرایی مجله، کتاب و بروشور.',
   },
   {
-    aliases: ['canva'],
+    aliases: ['canva', 'کانوا'],
     key: 'canva',
     name: 'کانوا',
     category: 'design',
@@ -681,7 +688,7 @@ const BRANDS: BrandRule[] = [
     blurb: 'طراحی گرافیک آسان با قالب‌های آماده برای شبکه‌های اجتماعی.',
   },
   {
-    aliases: ['figma'],
+    aliases: ['figma', 'فیگما'],
     name: 'فیگما',
     category: 'design',
     emoji: '🧩',
@@ -689,7 +696,7 @@ const BRANDS: BrandRule[] = [
     blurb: 'طراحی رابط کاربری و همکاری تیمی روی پروژه‌های دیجیتال.',
   },
   {
-    aliases: ['capcut'],
+    aliases: ['capcut', 'کپ‌کات', 'کپ کات'],
     name: 'کپ‌کات',
     category: 'design',
     emoji: '✂️',
@@ -778,7 +785,7 @@ const BRANDS: BrandRule[] = [
     blurb: 'پلتفرم خرید و اجرای بازی‌های رایانه‌ای.',
   },
   {
-    aliases: ['playstation plus', 'ps plus', 'psn', 'playstation network'],
+    aliases: ['playstation plus', 'ps plus', 'psn', 'playstation network', 'پلی‌استیشن پلاس'],
     name: 'پلی‌استیشن پلاس',
     category: 'gaming',
     emoji: '🕹️',
@@ -786,7 +793,7 @@ const BRANDS: BrandRule[] = [
     blurb: 'بازی آنلاین، بازی‌های ماهانه و تخفیف‌های پلی‌استیشن.',
   },
   {
-    aliases: ['playstation'],
+    aliases: ['playstation', 'پلی‌استیشن'],
     name: 'پلی‌استیشن',
     category: 'gaming',
     emoji: '🕹️',
@@ -794,7 +801,7 @@ const BRANDS: BrandRule[] = [
     blurb: 'شارژ و خرید از فروشگاه پلی‌استیشن.',
   },
   {
-    aliases: ['xbox game pass', 'xbox live', 'xbox'],
+    aliases: ['xbox game pass', 'xbox live', 'xbox', 'ایکس‌باکس'],
     name: 'ایکس‌باکس',
     category: 'gaming',
     emoji: '🟩',
@@ -809,7 +816,7 @@ const BRANDS: BrandRule[] = [
     blurb: 'بازی آنلاین و خرید از فروشگاه نینتندو.',
   },
   {
-    aliases: ['discord nitro', 'discord'],
+    aliases: ['discord nitro', 'discord', 'دیسکورد نیترو', 'دیسکورد'],
     name: 'دیسکورد نیترو',
     category: 'gaming',
     emoji: '💬',
@@ -938,7 +945,7 @@ const BRANDS: BrandRule[] = [
 
   /* --------------------------------- Social ------------------------------- */
   {
-    aliases: ['telegram premium', 'telegram'],
+    aliases: ['telegram premium', 'telegram', 'تلگرام پریمیوم', 'تلگرام'],
     name: 'تلگرام پریمیوم',
     category: 'social',
     emoji: '✈️',
@@ -946,7 +953,7 @@ const BRANDS: BrandRule[] = [
     blurb: 'ارتقای تلگرام با استیکر اختصاصی، آپلود بزرگ‌تر و سرعت بیشتر.',
   },
   {
-    aliases: ['instagram', 'meta verified', 'insta'],
+    aliases: ['instagram', 'meta verified', 'insta', 'اینستاگرام'],
     name: 'اینستاگرام',
     category: 'social',
     emoji: '📸',
@@ -954,7 +961,7 @@ const BRANDS: BrandRule[] = [
     blurb: 'ارتقای حساب اینستاگرام و امکانات ویژه سازندگان محتوا.',
   },
   {
-    aliases: ['tiktok', 'tik tok'],
+    aliases: ['tiktok', 'tik tok', 'تیک‌تاک', 'تیک تاک'],
     name: 'تیک‌تاک',
     category: 'social',
     emoji: '🕺',
@@ -1049,7 +1056,7 @@ const BRANDS: BrandRule[] = [
 
   /* ------------------------------- Education ------------------------------ */
   {
-    aliases: ['duolingo', 'super duolingo'],
+    aliases: ['duolingo', 'super duolingo', 'دولینگو'],
     name: 'دولینگو',
     category: 'other',
     emoji: '🦉',
@@ -1057,7 +1064,7 @@ const BRANDS: BrandRule[] = [
     blurb: 'یادگیری زبان با تمرین‌های کوتاه و بازی‌وار بدون تبلیغ.',
   },
   {
-    aliases: ['coursera'],
+    aliases: ['coursera', 'کورسرا'],
     name: 'کورسرا',
     category: 'other',
     emoji: '🎓',
@@ -1167,7 +1174,7 @@ const BRANDS: BrandRule[] = [
     blurb: 'لایسنس مادام‌العمر آفیس ۲۰۱۹.',
   },
   {
-    aliases: ['windows 11', 'win 11'],
+    aliases: ['windows 11', 'win 11', 'ویندوز ۱۱', 'ویندوز 11'],
     name: 'ویندوز ۱۱',
     category: 'other',
     emoji: '🪟',
@@ -1175,7 +1182,7 @@ const BRANDS: BrandRule[] = [
     blurb: 'لایسنس اورجینال ویندوز ۱۱ با فعال‌سازی مادام‌العمر.',
   },
   {
-    aliases: ['windows 10', 'win 10'],
+    aliases: ['windows 10', 'win 10', 'ویندوز ۱۰', 'ویندوز 10'],
     name: 'ویندوز ۱۰',
     category: 'other',
     emoji: '🪟',
@@ -1183,14 +1190,14 @@ const BRANDS: BrandRule[] = [
     blurb: 'لایسنس اورجینال ویندوز ۱۰ با فعال‌سازی مادام‌العمر.',
   },
   {
-    aliases: ['windows server'],
+    aliases: ['windows server', 'ویندوز سرور'],
     name: 'ویندوز سرور',
     category: 'other',
     emoji: '🖥️',
     blurb: 'لایسنس ویندوز سرور برای محیط‌های سازمانی.',
   },
   {
-    aliases: ['windows'],
+    aliases: ['windows', 'ویندوز'],
     name: 'ویندوز',
     category: 'other',
     emoji: '🪟',
@@ -1317,7 +1324,7 @@ const BRANDS: BrandRule[] = [
     blurb: 'فضای ذخیره‌سازی ابری مایکروسافت.',
   },
   {
-    aliases: ['icloud', 'apple one'],
+    aliases: ['icloud', 'apple one', 'آی‌کلاد', 'آی کلاد', 'اپل وان'],
     name: 'آی‌کلاد',
     category: 'other',
     emoji: '☁️',
@@ -1345,14 +1352,20 @@ const BRANDS: BrandRule[] = [
     blurb: 'مدیریت و اشتراک امن فایل‌های سازمانی.',
   },
   {
-    aliases: ['apple gift card', 'itunes gift card', 'app store gift card'],
+    aliases: [
+      'apple gift card',
+      'itunes gift card',
+      'app store gift card',
+      'گیفت کارت اپل',
+      'اپل گیفت کارت',
+    ],
     name: 'گیفت‌کارت اپل',
     category: 'other',
     emoji: '🍎',
     blurb: 'گیفت‌کارت خرید از اپ استور و فروشگاه اپل.',
   },
   {
-    aliases: ['amazon gift card'],
+    aliases: ['amazon gift card', 'گیفت کارت آمازون', 'آمازون گیفت کارت'],
     name: 'گیفت‌کارت آمازون',
     category: 'other',
     emoji: '🎁',
@@ -1540,7 +1553,7 @@ const BRANDS: BrandRule[] = [
     blurb: VPN_BLURB,
   },
   {
-    aliases: ['expressvpn', 'express vpn'],
+    aliases: ['expressvpn', 'express vpn', 'اکسپرس وی‌پی‌ان', 'اکسپرس وی پی ان'],
     name: 'اکسپرس وی‌پی‌ان',
     category: 'other',
     emoji: '🚀',

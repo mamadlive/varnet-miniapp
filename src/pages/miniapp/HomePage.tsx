@@ -354,20 +354,22 @@ export default function HomePage() {
                 </div>
                 <span className="shrink-0 text-[10.5px] font-medium text-tg-hint">پیشنهاد ما</span>
               </div>
-              <div
-                role="group"
-                aria-label="محصولات ویژه"
-                tabIndex={0}
-                className="hide-scrollbar -mx-4 flex flex-nowrap snap-x snap-mandatory gap-3 overflow-x-auto overflow-y-hidden overscroll-x-contain scroll-px-4 px-4 pb-1 [-webkit-overflow-scrolling:touch]"
-              >
-                {featured.map((product, index) => (
-                  <FeaturedOfferCard
-                    key={product.id}
-                    product={product}
-                    onPurchase={handlePurchase}
-                    style={{ animationDelay: `${index * 40}ms` }}
-                  />
-                ))}
+              <div className="w-full overflow-hidden">
+                <div
+                  role="group"
+                  aria-label="محصولات ویژه"
+                  tabIndex={0}
+                  className="hide-scrollbar -mx-4 flex max-w-full flex-nowrap snap-x snap-mandatory gap-3 overflow-x-auto overflow-y-hidden overscroll-x-contain scroll-px-4 px-4 pb-1 touch-pan-x [-webkit-overflow-scrolling:touch]"
+                >
+                  {featured.map((product, index) => (
+                    <FeaturedOfferCard
+                      key={product.id}
+                      product={product}
+                      onPurchase={handlePurchase}
+                      style={{ animationDelay: `${index * 40}ms` }}
+                    />
+                  ))}
+                </div>
               </div>
             </div>
           ) : null}

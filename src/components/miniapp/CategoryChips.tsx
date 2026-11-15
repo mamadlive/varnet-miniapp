@@ -30,39 +30,41 @@ export function CategoryChips({ value, onChange, className }: CategoryChipsProps
   const { select } = useTelegram()
 
   return (
-    <div
-      role="group"
-      aria-label="فیلتر بر اساس دسته‌بندی"
-      className={cn(
-        'hide-scrollbar -mx-4 flex flex-nowrap snap-x snap-mandatory gap-2 overflow-x-auto overflow-y-hidden overscroll-x-contain px-4 py-1 [-webkit-overflow-scrolling:touch]',
-        className,
-      )}
-    >
-      {CATEGORY_OPTIONS.map((option) => {
-        const active = option.value === value
-        return (
-          <button
-            key={option.value}
-            type="button"
-            aria-pressed={active}
-            onClick={() => {
-              select()
-              onChange(option.value)
-            }}
-            className={cn(
-              'flex h-11 shrink-0 items-center gap-1.5 whitespace-nowrap rounded-full border px-4 text-[13px] font-medium transition-all duration-150 active:scale-[0.96]',
-              active
-                ? 'border-transparent bg-tg-button text-tg-button-text shadow-sm'
-                : 'border-tg-separator bg-tg-bg text-tg-text hover:bg-tg-secondary-bg',
-            )}
-          >
-            <span aria-hidden className="text-[15px] leading-none">
-              {option.emoji}
-            </span>
-            {option.label}
-          </button>
-        )
-      })}
+    <div className="w-full overflow-hidden">
+      <div
+        role="group"
+        aria-label="فیلتر بر اساس دسته‌بندی"
+        className={cn(
+          'hide-scrollbar -mx-4 flex max-w-full flex-nowrap snap-x snap-mandatory gap-2 overflow-x-auto overflow-y-hidden overscroll-x-contain px-4 py-1 touch-pan-x [-webkit-overflow-scrolling:touch]',
+          className,
+        )}
+      >
+        {CATEGORY_OPTIONS.map((option) => {
+          const active = option.value === value
+          return (
+            <button
+              key={option.value}
+              type="button"
+              aria-pressed={active}
+              onClick={() => {
+                select()
+                onChange(option.value)
+              }}
+              className={cn(
+                'flex h-11 shrink-0 items-center gap-1.5 whitespace-nowrap rounded-full border px-4 text-[13px] font-medium transition-all duration-150 active:scale-[0.96]',
+                active
+                  ? 'border-transparent bg-tg-button text-tg-button-text shadow-sm'
+                  : 'border-tg-separator bg-tg-bg text-tg-text hover:bg-tg-secondary-bg',
+              )}
+            >
+              <span aria-hidden className="text-[15px] leading-none">
+                {option.emoji}
+              </span>
+              {option.label}
+            </button>
+          )
+        })}
+      </div>
     </div>
   )
 }
