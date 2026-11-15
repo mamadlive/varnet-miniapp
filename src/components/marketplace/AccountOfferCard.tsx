@@ -60,7 +60,13 @@ export function AccountOfferCard({
         <span aria-hidden className="absolute -bottom-8 -right-3 size-24 rounded-full bg-black/15 blur-xl" />
 
         <span className="relative flex size-11 items-center justify-center rounded-2xl bg-white/18 ring-1 ring-white/30 backdrop-blur-sm">
-          <Icon className="size-5 text-white" aria-hidden />
+          {product.emoji ? (
+            <span aria-hidden className="select-none text-[24px] leading-none drop-shadow">
+              {product.emoji}
+            </span>
+          ) : (
+            <Icon className="size-5 text-white" aria-hidden />
+          )}
         </span>
 
         {product.badge ? (

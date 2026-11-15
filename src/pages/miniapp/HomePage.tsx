@@ -13,6 +13,7 @@ import {
 import {
   AccountOfferCard,
   AccountOfferCardSkeleton,
+  FeaturedOfferCard,
   MarketplaceTabs,
   PurchaseConfirmSheet,
   VpnOfferCard,
@@ -29,6 +30,7 @@ import { EmptyState } from '@/components/ui/EmptyState'
 import { useTelegram } from '@/hooks/useTelegram'
 import { formatCount } from '@/lib/format'
 import { fa } from '@/lib/i18n'
+import { pickFeaturedProducts } from '@/lib/providerMapper'
 import { initials } from '@/lib/utils'
 import { listAccountProducts } from '@/services/accounts.service'
 import { listVpnPlans } from '@/services/vpn.service'
@@ -184,6 +186,8 @@ export default function HomePage() {
     [products.length, plans.length],
   )
 
+  const featured = useMemo(() => pickFeaturedProducts(products), [products])
+
   const handleTabChange = useCallback(
     (next: MarketplaceTab) => {
       haptic('light')
@@ -333,6 +337,36 @@ export default function HomePage() {
           aria-labelledby="marketplace-tab-accounts"
           className="mt-5 animate-fade-in"
         >
+          {featured.length > 0 ? (
+            <div className="mb-6" aria-labelledby="featured-products-heading">
+              <div className="mb-2.5 flex items-end justify-between gap-3 px-0.5">
+                <div className="min-w-0">
+                  <h3
+                    id="featured-products-heading"
+                    className="flex items-center gap-1.5 text-[15px] font-bold text-tg-text"
+                  >
+                    <Sparkles className="size-4 text-brand-500" aria-hidden />
+                    محصولات ویژه
+                  </h3>
+                  <p className="mt-0.5 text-[11.5px] leading-snug text-tg-hint">
+                    محبوب‌ترین اشتراک‌ها، دست‌چین‌شده با تحویل فوری
+                  </p>
+                </div>
+                <span className="shrink-0 text-[10.5px] font-medium text-tg-hint">پیشنهاد ما</span>
+              </div>
+              <div className="no-scrollbar -mx-4 flex snap-x snap-mandatory gap-3 overflow-x-auto px-4 pb-1">
+                {featured.map((product, index) => (
+                  <FeaturedOfferCard
+                    key={product.id}
+                    product={product}
+                    onPurchase={handlePurchase}
+                    style={{ animationDelay: `${index * 40}ms` }}
+                  />
+                ))}
+              </div>
+            </div>
+          ) : null}
+
           <SectionHeading
             title={fa.marketplace.premiumAccounts}
             subtitle="استریم، هوش مصنوعی، گیمینگ و اشتراک‌های طراحی"

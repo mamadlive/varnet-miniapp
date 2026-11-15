@@ -81,6 +81,8 @@ export interface AccountProduct {
   gradient?: string
   /** Emoji used by the placeholder artwork (backend sends image URLs later). */
   emoji?: string
+  /** Stable brand identifier resolved by the provider mapper (`netflix`, `chatgpt`, …). */
+  brandKey?: string
 }
 
 /* -------------------------------------------------------------------------- */
