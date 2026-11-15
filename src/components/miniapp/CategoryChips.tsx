@@ -34,7 +34,7 @@ export function CategoryChips({ value, onChange, className }: CategoryChipsProps
       role="group"
       aria-label="فیلتر بر اساس دسته‌بندی"
       className={cn(
-        'hide-scrollbar -mx-4 flex flex-nowrap gap-2 overflow-x-auto overflow-y-hidden overscroll-x-contain px-4 py-1 [-webkit-overflow-scrolling:touch]',
+        'hide-scrollbar -mx-4 flex flex-nowrap snap-x snap-mandatory gap-2 overflow-x-auto overflow-y-hidden overscroll-x-contain px-4 py-1 [-webkit-overflow-scrolling:touch]',
         className,
       )}
     >

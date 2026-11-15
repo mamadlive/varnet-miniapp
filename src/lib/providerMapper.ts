@@ -71,7 +71,7 @@ const CATEGORY_STYLE: Record<ProductCategory, { emoji: string; gradient: string 
   gaming: { emoji: '🎮', gradient: 'from-sky-500 via-blue-500 to-indigo-500' },
   design: { emoji: '🎨', gradient: 'from-fuchsia-500 via-pink-500 to-rose-500' },
   social: { emoji: '✈️', gradient: 'from-sky-400 via-cyan-400 to-blue-500' },
-  other: { emoji: '🛍️', gradient: 'from-brand-500 to-brand-700' },
+  other: { emoji: '💻', gradient: 'from-brand-500 to-brand-700' },
 }
 
 const GENERIC_GRADIENTS = new Set(Object.values(CATEGORY_STYLE).map((style) => style.gradient))
