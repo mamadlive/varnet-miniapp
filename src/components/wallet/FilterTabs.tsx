@@ -38,7 +38,7 @@ export function FilterTabs<T extends string>({
       className={cn(
         isSegmented
           ? 'flex gap-1 rounded-2xl border border-tg-separator bg-tg-secondary-bg p-1'
-          : 'no-scrollbar -mx-4 flex gap-2 overflow-x-auto px-4 pb-0.5',
+          : 'hide-scrollbar -mx-4 flex flex-nowrap gap-2 overflow-x-auto overflow-y-hidden overscroll-x-contain px-4 pb-0.5 [-webkit-overflow-scrolling:touch]',
         className,
       )}
     >

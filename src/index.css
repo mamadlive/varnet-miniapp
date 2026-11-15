@@ -205,6 +205,22 @@
   }
 }
 
+/**
+ * Alias of `no-scrollbar` for swipeable rows. Some mobile WebViews (notably the
+ * Telegram iOS/Android shell) render a horizontal scrollbar gutter inside the
+ * row unless every scrollbar width is zeroed on the element itself.
+ */
+@utility hide-scrollbar {
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+
+  &::-webkit-scrollbar {
+    display: none;
+    width: 0;
+    height: 0;
+  }
+}
+
 /** Respect the iPhone home-indicator area for bottom navigation. */
 @utility safe-bottom {
   padding-bottom: calc(env(safe-area-inset-bottom, 0px) + 0.5rem);

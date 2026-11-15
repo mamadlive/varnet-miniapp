@@ -33,7 +33,10 @@ export function CategoryChips({ value, onChange, className }: CategoryChipsProps
     <div
       role="group"
       aria-label="فیلتر بر اساس دسته‌بندی"
-      className={cn('no-scrollbar -mx-4 flex gap-2 overflow-x-auto px-4 py-1', className)}
+      className={cn(
+        'hide-scrollbar -mx-4 flex flex-nowrap gap-2 overflow-x-auto overflow-y-hidden overscroll-x-contain px-4 py-1 [-webkit-overflow-scrolling:touch]',
+        className,
+      )}
     >
       {CATEGORY_OPTIONS.map((option) => {
         const active = option.value === value
@@ -47,7 +50,7 @@ export function CategoryChips({ value, onChange, className }: CategoryChipsProps
               onChange(option.value)
             }}
             className={cn(
-              'flex h-11 shrink-0 items-center gap-1.5 rounded-full border px-4 text-[13px] font-medium transition-all duration-150 active:scale-[0.96]',
+              'flex h-11 shrink-0 items-center gap-1.5 whitespace-nowrap rounded-full border px-4 text-[13px] font-medium transition-all duration-150 active:scale-[0.96]',
               active
                 ? 'border-transparent bg-tg-button text-tg-button-text shadow-sm'
                 : 'border-tg-separator bg-tg-bg text-tg-text hover:bg-tg-secondary-bg',
