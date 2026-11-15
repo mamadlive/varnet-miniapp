@@ -1,6 +1,6 @@
 import { useEffect } from 'react'
 import { NavLink, Outlet } from 'react-router-dom'
-import { Home, LayoutGrid, ShieldCheck, UserRound, Wallet } from 'lucide-react'
+import { Home, LayoutGrid, Moon, ShieldCheck, Sun, UserRound, Wallet } from 'lucide-react'
 import type { LucideIcon } from 'lucide-react'
 import { Badge } from '@/components/ui'
 import { env } from '@/config/env'
@@ -33,7 +33,10 @@ const TABS: Tab[] = [
 export default function MiniAppLayout() {
   const { isTelegram, haptic } = useTelegram()
   const syncMiniAppTheme = useThemeStore((state) => state.syncMiniApp)
+  const theme = useThemeStore((state) => state.theme)
+  const toggleMiniAppTheme = useThemeStore((state) => state.toggleMiniAppTheme)
   const showDemoChip = env.demoMode && !isTelegram
+  const isDark = theme === 'dark'
 
   // An explicit Mini App choice wins; otherwise the Telegram client palette is
   // authoritative and a browser preview follows the OS.
@@ -59,6 +62,24 @@ export default function MiniAppLayout() {
               {fa.common.demo}
             </Badge>
           ) : null}
+
+          <button
+            type="button"
+            onClick={() => {
+              haptic('light')
+              toggleMiniAppTheme()
+            }}
+            aria-pressed={isDark}
+            aria-label={isDark ? 'تغییر به حالت روشن' : 'تغییر به حالت تاریک'}
+            title={isDark ? 'حالت روشن' : 'حالت تاریک'}
+            className="flex size-9 shrink-0 items-center justify-center rounded-xl border border-tg-separator bg-tg-bg text-tg-hint transition-colors hover:bg-tg-secondary-bg hover:text-tg-text focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-500/40"
+          >
+            {isDark ? (
+              <Sun className="size-[18px]" aria-hidden />
+            ) : (
+              <Moon className="size-[18px]" aria-hidden />
+            )}
+          </button>
         </div>
       </header>
 

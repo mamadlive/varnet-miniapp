@@ -9,6 +9,7 @@ import {
   Search,
   SlidersHorizontal,
   StickyNote,
+  Trash2,
 } from 'lucide-react'
 import { AdminErrorState } from '@/components/admin/AdminStates'
 import { AdminPageHeader } from '@/components/admin/AdminPageHeader'
@@ -35,6 +36,7 @@ import { formatCount, formatCurrency, toPersianDigits } from '@/lib/format'
 import { fa } from '@/lib/i18n'
 import { isApiError } from '@/services/apiClient'
 import { listAccountProducts, syncAccountProducts } from '@/services/accounts.service'
+import { TEST_PRODUCT_IDS } from '@/services/mocks'
 import { useAdminStore } from '@/store/adminStore'
 import type { AccountProduct, DiscountType, ProductCategory } from '@/types'
 
@@ -69,6 +71,8 @@ export default function ProductsPage() {
   const setMargin = useAdminStore((state) => state.setMargin)
   const hiddenProductIds = useAdminStore((state) => state.hiddenProductIds)
   const toggleProductHidden = useAdminStore((state) => state.toggleProductHidden)
+  const deleteProduct = useAdminStore((state) => state.deleteProduct)
+  const deleteTestProducts = useAdminStore((state) => state.deleteTestProducts)
   const productNotes = useAdminStore((state) => state.productNotes)
   const setProductNote = useAdminStore((state) => state.setProductNote)
   const usdtRateToman = useAdminStore((state) =>
@@ -81,6 +85,10 @@ export default function ProductsPage() {
   const [marginError, setMarginError] = useState<string | null>(null)
   const [noteProduct, setNoteProduct] = useState<AccountProduct | null>(null)
   const [noteValue, setNoteValue] = useState('')
+
+  const testProductCount = products.filter((product) =>
+    TEST_PRODUCT_IDS.includes(product.id),
+  ).length
 
   const basePriceOf = (product: AccountProduct): number => product.basePrice ?? product.price
   const usdPriceOf = (product: AccountProduct): number =>
@@ -142,6 +150,25 @@ export default function ProductsPage() {
       value > 0 ? { type: marginType, value: Math.round(value) } : null,
     )
     closeMarginEditor()
+  }
+
+  const handleDeleteProduct = (product: AccountProduct) => {
+    const confirmed = window.confirm(
+      `محصول «${product.title}» برای همیشه حذف شود؟\nاین عمل قابل بازگشت نیست و با همگام‌سازی مجدد هم برنمی‌گردد.`,
+    )
+    if (!confirmed) return
+    deleteProduct(product.id)
+    setProducts((current) => current.filter((item) => item.id !== product.id))
+  }
+
+  const handleDeleteTestProducts = () => {
+    if (testProductCount === 0) return
+    const confirmed = window.confirm(
+      `${formatCount(testProductCount)} محصول نمونه (داده‌های آزمایشی) حذف شود؟\nاین عمل قابل بازگشت نیست.`,
+    )
+    if (!confirmed) return
+    deleteTestProducts()
+    setProducts((current) => current.filter((product) => !TEST_PRODUCT_IDS.includes(product.id)))
   }
 
   const marginPreviewBase = marginProduct ? basePriceOf(marginProduct) : 0
@@ -330,6 +357,7 @@ export default function ProductsPage() {
               size="icon"
               className="size-7 rounded-lg"
               aria-label={`تعیین حاشیه سود ${product.title}`}
+              title="ویرایش حاشیه سود"
               onClick={() => openMarginEditor(product)}
             >
               <SlidersHorizontal className="size-3.5" aria-hidden />
@@ -415,6 +443,16 @@ export default function ProductsPage() {
           >
             <StickyNote className="size-3.5" aria-hidden />
           </Button>
+          <Button
+            variant="ghost"
+            size="icon"
+            className="size-8 rounded-lg text-tg-destructive hover:bg-rose-500/10"
+            aria-label={`حذف ${product.title}`}
+            title="حذف محصول"
+            onClick={() => handleDeleteProduct(product)}
+          >
+            <Trash2 className="size-3.5" aria-hidden />
+          </Button>
         </div>
       ),
     },
@@ -455,6 +493,17 @@ export default function ProductsPage() {
             >
               {fa.common.refresh}
             </Button>
+            {testProductCount > 0 ? (
+              <Button
+                variant="secondary"
+                size="sm"
+                className="text-tg-destructive hover:bg-rose-500/10"
+                leftIcon={<Trash2 className="size-4" />}
+                onClick={handleDeleteTestProducts}
+              >
+                حذف محصولات نمونه ({formatCount(testProductCount)})
+              </Button>
+            ) : null}
           </div>
         }
       />

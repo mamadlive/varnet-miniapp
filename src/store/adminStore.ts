@@ -8,6 +8,7 @@ import {
   mockCoupons,
   mockProfitMargins,
   mockSupportTickets,
+  TEST_PRODUCT_IDS,
 } from '@/services/mocks'
 import type {
   AccountProduct,
@@ -56,6 +57,8 @@ interface AdminState {
   productNotes: Record<string, string>
   /** Products removed from the Mini App storefront (still visible to admin). */
   hiddenProductIds: string[]
+  /** Ids purged by the admin; a provider re-sync must not resurrect them. */
+  deletedProductIds: string[]
   /** Manual bank-transfer destination shown to customers in «افزایش موجودی». */
   bankDetails: BankAccountDetails
   /** Shared inbox — the Mini App opens tickets, the admin panel answers them. */
@@ -76,6 +79,10 @@ interface AdminState {
   setServerUsdtRateToman: (rate: number) => void
   setProductNote: (productId: string, note: string) => void
   toggleProductHidden: (productId: string) => void
+  /** Removes a product and its margin/note/visibility overrides for good. */
+  deleteProduct: (productId: string) => void
+  /** Purges every built-in fixture product at once. */
+  deleteTestProducts: () => void
   saveBankDetails: (details: Omit<BankAccountDetails, 'updatedAt'>) => void
   createTicket: (input: CreateTicketInput) => SupportTicket
   replyToTicket: (id: string, body: string, author: TicketAuthor) => void
@@ -90,6 +97,28 @@ const EMPTY_CREDENTIAL: ProviderCredential = { value: '', updatedAt: null }
 /** Keeps the tier ladder working before the first sync reports the live rate. */
 const DEFAULT_SERVER_USDT_RATE_TOMAN = 70_000
 
+type PurgeableState = Pick<
+  AdminState,
+  'products' | 'margins' | 'productNotes' | 'hiddenProductIds' | 'deletedProductIds'
+>
+
+function purgeProducts(state: PurgeableState, ids: string[]): Partial<AdminState> {
+  if (ids.length === 0) return {}
+  const removing = new Set(ids)
+  const without = <T,>(record: Record<string, T>): Record<string, T> =>
+    Object.fromEntries(Object.entries(record).filter(([id]) => !removing.has(id)))
+  return {
+    products: state.products.filter((product) => !removing.has(product.id)),
+    margins: without(state.margins),
+    productNotes: without(state.productNotes),
+    hiddenProductIds: state.hiddenProductIds.filter((id) => !removing.has(id)),
+    deletedProductIds: [
+      ...state.deletedProductIds,
+      ...ids.filter((id) => !state.deletedProductIds.includes(id)),
+    ],
+  }
+}
+
 export const useAdminStore = create<AdminState>()(
   persist(
     (set) => ({
@@ -100,6 +129,7 @@ export const useAdminStore = create<AdminState>()(
       serverUsdtRateToman: DEFAULT_SERVER_USDT_RATE_TOMAN,
       productNotes: {},
       hiddenProductIds: [],
+      deletedProductIds: [],
       bankDetails: mockBankDetails,
       tickets: mockSupportTickets,
       broadcasts: mockBroadcasts,
@@ -171,6 +201,14 @@ export const useAdminStore = create<AdminState>()(
             ? state.hiddenProductIds.filter((id) => id !== productId)
             : [...state.hiddenProductIds, productId],
         }))
+      },
+
+      deleteProduct: (productId) => {
+        set((state) => purgeProducts(state, [productId]))
+      },
+
+      deleteTestProducts: () => {
+        set((state) => purgeProducts(state, TEST_PRODUCT_IDS))
       },
 
       saveBankDetails: (details) => {
@@ -278,6 +316,7 @@ export const useAdminStore = create<AdminState>()(
         serverUsdtRateToman: state.serverUsdtRateToman,
         productNotes: state.productNotes,
         hiddenProductIds: state.hiddenProductIds,
+        deletedProductIds: state.deletedProductIds,
         bankDetails: state.bankDetails,
         tickets: state.tickets,
         broadcasts: state.broadcasts,

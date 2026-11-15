@@ -183,6 +183,9 @@ export const mockAccountProducts: AccountProduct[] = [
   },
 ]
 
+/** Ids of the built-in fixtures, so the admin can purge the demo catalogue. */
+export const TEST_PRODUCT_IDS: string[] = mockAccountProducts.map((product) => product.id)
+
 /* -------------------------------------------------------------------------- */
 /* Pricing & discounts                                                        */
 /* -------------------------------------------------------------------------- */

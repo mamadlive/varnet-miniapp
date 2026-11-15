@@ -136,18 +136,22 @@ async function fetchProviderCatalog(): Promise<AccountCatalogSyncResult> {
  */
 export async function syncAccountProducts(): Promise<AccountCatalogSyncResult> {
   const { products, skipped, fetchedAt } = await fetchProviderCatalog()
-  useAdminStore.getState().setProducts(products)
-  return { products, skipped, fetchedAt }
+  const { deletedProductIds, setProducts } = useAdminStore.getState()
+  // A product the admin deleted must stay deleted across provider re-syncs.
+  const kept = products.filter((product) => !deletedProductIds.includes(product.id))
+  setProducts(kept)
+  return { products: kept, skipped, fetchedAt }
 }
 
 export async function listAccountProducts(
   query: AccountProductQuery = {},
 ): Promise<AccountProduct[]> {
   const { category = 'all', search, includeHidden = false } = query
-  const { products, hiddenProductIds } = useAdminStore.getState()
+  const { products, hiddenProductIds, deletedProductIds } = useAdminStore.getState()
 
   return products
     .filter((product) => {
+      if (deletedProductIds.includes(product.id)) return false
       if (!includeHidden && hiddenProductIds.includes(product.id)) return false
       if (category !== 'all' && product.category !== category) return false
       if (search) {
@@ -160,6 +164,8 @@ export async function listAccountProducts(
 }
 
 export async function getAccountProduct(id: string): Promise<AccountProduct | null> {
-  const product = useAdminStore.getState().products.find((item) => item.id === id)
+  const { products, deletedProductIds } = useAdminStore.getState()
+  if (deletedProductIds.includes(id)) return null
+  const product = products.find((item) => item.id === id)
   return product ? withPricing(product) : null
 }
