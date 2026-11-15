@@ -38,6 +38,13 @@ interface CatalogProduct {
   category: ProductCategory
   price: number
   oldPrice?: number
+  /**
+   * Raw upstream amount, kept so the Mini App can reprice with an admin-managed
+   * USDT rate instead of the server conversion below.
+   */
+  providerPrice: number
+  providerOldPrice?: number
+  providerCurrency: string
   currency: 'IRT'
   stock: number
   rating?: number
@@ -173,13 +180,20 @@ function normalizeProduct(raw: unknown, usdtRate: number): CatalogProduct | null
 
   const title = firstString(record, ['title', 'name', 'display_name'])
   const currency = (firstString(record, ['currency', 'price_currency']) ?? 'IRT').toUpperCase()
+  const providerPrice = firstNumber(record, ['price', 'price_amount', 'amount'])
   const price = normalizeAmount(record, ['price', 'price_amount', 'amount'], currency, usdtRate)
-  if (!title || price === null) return null
+  if (!title || price === null || providerPrice === undefined || providerPrice < 0) return null
 
   const id =
     firstString(record, ['id', 'product_id', 'sku']) ?? `prov_${slugify(title) || 'product'}`
   const category = normalizeCategory(firstString(record, ['category', 'type', 'group']))
   const style = CATEGORY_STYLES[category]
+  const providerOldPrice = firstNumber(record, [
+    'old_price',
+    'oldPrice',
+    'original_price',
+    'compare_at_price',
+  ])
   const oldPriceRaw = normalizeAmount(
     record,
     ['old_price', 'oldPrice', 'original_price', 'compare_at_price'],
@@ -197,6 +211,12 @@ function normalizeProduct(raw: unknown, usdtRate: number): CatalogProduct | null
     category,
     price,
     oldPrice: oldPriceRaw !== null && oldPriceRaw > price ? oldPriceRaw : undefined,
+    providerPrice,
+    providerOldPrice:
+      providerOldPrice !== undefined && providerOldPrice > providerPrice
+        ? providerOldPrice
+        : undefined,
+    providerCurrency: currency,
     currency: 'IRT',
     stock,
     rating:
@@ -359,6 +379,13 @@ export async function onRequestGet(context: PagesContext): Promise<Response> {
   return jsonResponse({
     success: true,
     data: products,
-    meta: { count: products.length, skipped, fetchedAt: new Date().toISOString() },
+    meta: {
+      count: products.length,
+      skipped,
+      fetchedAt: new Date().toISOString(),
+      // Surfaced so the admin settings page can show the server rate and the
+      // client can convert Toman bases back to USDT for the margin tiers.
+      usdtRate,
+    },
   })
 }

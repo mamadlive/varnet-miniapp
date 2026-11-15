@@ -3,12 +3,12 @@ import {
   CheckCircle2,
   CircleAlert,
   CloudDownload,
-  MoreHorizontal,
   Package,
   Pencil,
   RefreshCw,
   Search,
   SlidersHorizontal,
+  StickyNote,
 } from 'lucide-react'
 import { AdminErrorState } from '@/components/admin/AdminStates'
 import { AdminPageHeader } from '@/components/admin/AdminPageHeader'
@@ -23,9 +23,15 @@ import { EmptyState } from '@/components/ui/EmptyState'
 import { Input } from '@/components/ui/Input'
 import { Sheet } from '@/components/ui/Sheet'
 import { Switch } from '@/components/ui/Switch'
-import { applyProfitMargin, hasMargin } from '@/lib/pricing'
+import {
+  applyProfitMargin,
+  autoMarginForUsd,
+  autoMarginPercentForUsd,
+  hasMargin,
+  type ProfitMargin,
+} from '@/lib/pricing'
 import { cn } from '@/lib/utils'
-import { formatCount, formatCurrency } from '@/lib/format'
+import { formatCount, formatCurrency, toPersianDigits } from '@/lib/format'
 import { fa } from '@/lib/i18n'
 import { isApiError } from '@/services/apiClient'
 import { listAccountProducts, syncAccountProducts } from '@/services/accounts.service'
@@ -52,7 +58,6 @@ export default function ProductsPage() {
   const [error, setError] = useState<string | null>(null)
   const [query, setQuery] = useState('')
   const [category, setCategory] = useState<CategoryFilter>('all')
-  const [statusOverrides, setStatusOverrides] = useState<Record<string, boolean>>({})
   const [syncing, setSyncing] = useState(false)
   const [syncNotice, setSyncNotice] = useState<{
     tone: 'success'
@@ -62,14 +67,30 @@ export default function ProductsPage() {
 
   const margins = useAdminStore((state) => state.margins)
   const setMargin = useAdminStore((state) => state.setMargin)
+  const hiddenProductIds = useAdminStore((state) => state.hiddenProductIds)
+  const toggleProductHidden = useAdminStore((state) => state.toggleProductHidden)
+  const productNotes = useAdminStore((state) => state.productNotes)
+  const setProductNote = useAdminStore((state) => state.setProductNote)
+  const usdtRateToman = useAdminStore((state) =>
+    state.usdtRateToman > 0 ? state.usdtRateToman : state.serverUsdtRateToman,
+  )
+
   const [marginProduct, setMarginProduct] = useState<AccountProduct | null>(null)
   const [marginType, setMarginType] = useState<DiscountType>('percent')
   const [marginValue, setMarginValue] = useState('')
   const [marginError, setMarginError] = useState<string | null>(null)
+  const [noteProduct, setNoteProduct] = useState<AccountProduct | null>(null)
+  const [noteValue, setNoteValue] = useState('')
 
   const basePriceOf = (product: AccountProduct): number => product.basePrice ?? product.price
+  const usdPriceOf = (product: AccountProduct): number =>
+    product.usdPrice ?? (usdtRateToman > 0 ? basePriceOf(product) / usdtRateToman : 0)
+  const marginFor = (product: AccountProduct): ProfitMargin =>
+    hasMargin(margins[product.id])
+      ? margins[product.id]!
+      : autoMarginForUsd(usdPriceOf(product))
   const finalPriceOf = (product: AccountProduct): number =>
-    applyProfitMargin(basePriceOf(product), margins[product.id])
+    applyProfitMargin(basePriceOf(product), marginFor(product))
 
   const openMarginEditor = (product: AccountProduct) => {
     const rule = margins[product.id]
@@ -83,6 +104,22 @@ export default function ProductsPage() {
     setMarginProduct(null)
     setMarginValue('')
     setMarginError(null)
+  }
+
+  const openNoteEditor = (product: AccountProduct) => {
+    setNoteProduct(product)
+    setNoteValue(productNotes[product.id] ?? '')
+  }
+
+  const closeNoteEditor = () => {
+    setNoteProduct(null)
+    setNoteValue('')
+  }
+
+  const handleSaveNote = () => {
+    if (!noteProduct) return
+    setProductNote(noteProduct.id, noteValue)
+    closeNoteEditor()
   }
 
   const handleSaveMargin = () => {
@@ -109,17 +146,19 @@ export default function ProductsPage() {
 
   const marginPreviewBase = marginProduct ? basePriceOf(marginProduct) : 0
   const marginPreviewValue = Number(marginValue)
-  const marginPreview =
-    marginProduct && Number.isFinite(marginPreviewValue) && marginPreviewValue > 0
-      ? applyProfitMargin(marginPreviewBase, {
-          type: marginType,
-          value: Math.round(marginPreviewValue),
-        })
-      : marginPreviewBase
+  const marginAutoPercent = marginProduct
+    ? autoMarginPercentForUsd(usdPriceOf(marginProduct))
+    : 0
+  const marginPreviewRule: ProfitMargin | undefined = marginProduct
+    ? Number.isFinite(marginPreviewValue) && marginPreviewValue > 0
+      ? { type: marginType, value: Math.round(marginPreviewValue) }
+      : autoMarginForUsd(usdPriceOf(marginProduct))
+    : undefined
+  const marginPreview = applyProfitMargin(marginPreviewBase, marginPreviewRule)
 
   const load = useCallback(async () => {
     try {
-      setProducts(await listAccountProducts())
+      setProducts(await listAccountProducts({ includeHidden: true }))
     } catch (err) {
       setError(err instanceof Error ? err.message : 'بارگیری محصولات ممکن نشد.')
     } finally {
@@ -147,7 +186,7 @@ export default function ProductsPage() {
 
     try {
       const result = await syncAccountProducts()
-      setProducts(await listAccountProducts())
+      setProducts(await listAccountProducts({ includeHidden: true }))
 
       const skippedNote =
         result.skipped > 0
@@ -169,7 +208,7 @@ export default function ProductsPage() {
     let cancelled = false
     const run = async () => {
       try {
-        const data = await listAccountProducts()
+        const data = await listAccountProducts({ includeHidden: true })
         if (!cancelled) setProducts(data)
       } catch (err) {
         if (!cancelled) setError(err instanceof Error ? err.message : 'بارگیری محصولات ممکن نشد.')
@@ -204,11 +243,12 @@ export default function ProductsPage() {
     })
   }, [category, products, query])
 
-  const isActive = (product: AccountProduct): boolean =>
-    statusOverrides[product.id] ?? product.stock > 0
+  const isVisible = (product: AccountProduct): boolean =>
+    !hiddenProductIds.includes(product.id)
 
-  const activeCount = products.filter((product) => isActive(product)).length
-  const marginCount = products.filter((product) => hasMargin(margins[product.id])).length
+  const visibleCount = products.filter((product) => isVisible(product)).length
+  const overrideCount = products.filter((product) => hasMargin(margins[product.id])).length
+  const noteCount = products.filter((product) => Boolean(productNotes[product.id])).length
   const hasFilters = category !== 'all' || query.trim().length > 0
 
   const columns: DataTableColumn<AccountProduct>[] = [
@@ -231,6 +271,12 @@ export default function ProductsPage() {
             <p className="truncate text-[11.5px] text-tg-hint">
               {product.subtitle ?? <span className="bidi-ltr">{product.id}</span>}
             </p>
+            {productNotes[product.id] ? (
+              <p className="mt-0.5 inline-flex items-center gap-1 text-[10.5px] font-medium text-brand-600">
+                <StickyNote className="size-3" aria-hidden />
+                توضیح ادمین
+              </p>
+            ) : null}
           </div>
         </div>
       ),
@@ -252,7 +298,7 @@ export default function ProductsPage() {
             <p className="text-[13px] font-semibold tabular-nums text-tg-text">
               {formatCurrency(finalPrice, product.currency)}
             </p>
-            {hasMargin(margins[product.id]) ? (
+            {finalPrice !== basePrice ? (
               <p className="text-[11px] tabular-nums text-tg-hint">
                 پایه {formatCurrency(basePrice, product.currency)}
               </p>
@@ -270,12 +316,14 @@ export default function ProductsPage() {
           <div className="flex items-center gap-2">
             {hasMargin(rule) ? (
               <Badge tone="success" size="sm">
-                {rule.type === 'percent'
+                دستی {rule.type === 'percent'
                   ? `+${formatCount(rule.value)}٪`
                   : `+${formatCurrency(rule.value)}`}
               </Badge>
             ) : (
-              <span className="text-[11.5px] text-tg-hint">بدون حاشیه</span>
+              <Badge tone="brand" size="sm">
+                خودکار {formatCount(autoMarginPercentForUsd(usdPriceOf(product)))}٪
+              </Badge>
             )}
             <Button
               variant="ghost"
@@ -314,26 +362,24 @@ export default function ProductsPage() {
       ),
     },
     {
-      key: 'status',
-      header: 'وضعیت',
+      key: 'visibility',
+      header: 'ویترین',
       render: (product) => {
-        const active = isActive(product)
+        const visible = isVisible(product)
         return (
           <div className="flex items-center gap-2">
             <Switch
-              checked={active}
-              label={`${active ? 'توقف' : 'فعال‌سازی'} ${product.title}`}
-              onCheckedChange={() =>
-                setStatusOverrides((previous) => ({ ...previous, [product.id]: !active }))
-              }
+              checked={visible}
+              label={`${visible ? 'حذف' : 'نمایش'} ${product.title} در ویترین`}
+              onCheckedChange={() => toggleProductHidden(product.id)}
             />
             <span
               className={cn(
                 'text-[12px] font-medium',
-                active ? 'text-tg-text' : 'text-tg-hint',
+                visible ? 'text-tg-text' : 'text-tg-hint',
               )}
             >
-              {active ? 'فعال' : 'متوقف'}
+              {visible ? 'نمایش' : 'پنهان'}
             </span>
           </div>
         )
@@ -357,10 +403,17 @@ export default function ProductsPage() {
           <Button
             variant="ghost"
             size="icon"
-            className="size-8 rounded-lg"
-            aria-label={`اقدامات بیشتر برای ${product.title}`}
+            className={cn(
+              'size-8 rounded-lg',
+              productNotes[product.id] ? 'text-brand-600' : undefined,
+            )}
+            aria-label={`توضیحات تکمیلی ${product.title}`}
+            title={
+              productNotes[product.id] ? 'ویرایش توضیحات تکمیلی' : 'افزودن توضیحات تکمیلی'
+            }
+            onClick={() => openNoteEditor(product)}
           >
-            <MoreHorizontal className="size-4" aria-hidden />
+            <StickyNote className="size-3.5" aria-hidden />
           </Button>
         </div>
       ),
@@ -377,7 +430,7 @@ export default function ProductsPage() {
       <AdminPageHeader
         eyebrow="کاتالوگ"
         title="محصولات اکانت"
-        description="اکانت‌ها و اشتراک‌های دیجیتال قابل فروش در مینی‌اپ. قیمت پایه از طریق پروکسی امن کلادفلر از ارائه‌دهنده خوانده می‌شود (کلید API فقط سمت سرور است) و حاشیه سود شما روی آن اعمال می‌شود."
+        description="اکانت‌ها و اشتراک‌های دیجیتال قابل فروش در مینی‌اپ. قیمت پایه از طریق پروکسی امن کلادفلر از ارائه‌دهنده خوانده می‌شود (کلید API فقط سمت سرور است) و سود پلکانی خودکار یا حاشیه دستی روی آن اعمال می‌شود."
         meta={
           <Badge tone="brand" size="sm">
             {formatCount(products.length)} محصول
@@ -431,11 +484,13 @@ export default function ProductsPage() {
       ) : (
         <>
           <div className="flex flex-wrap items-center gap-2 text-[12px] text-tg-hint">
-            <span>{formatCount(activeCount)} فعال</span>
+            <span>{formatCount(visibleCount)} در ویترین</span>
             <span className="text-tg-hint/50">·</span>
-            <span>{formatCount(products.length - activeCount)} متوقف</span>
+            <span>{formatCount(products.length - visibleCount)} پنهان</span>
             <span className="text-tg-hint/50">·</span>
-            <span>{formatCount(marginCount)} با حاشیه سود</span>
+            <span>{formatCount(overrideCount)} حاشیه دستی</span>
+            <span className="text-tg-hint/50">·</span>
+            <span>{formatCount(noteCount)} با توضیح ادمین</span>
             <span className="text-tg-hint/50">·</span>
             <span>{formatCount(filteredProducts.length)} نمایش</span>
           </div>
@@ -504,7 +559,7 @@ export default function ProductsPage() {
         title="حاشیه سود"
         description={
           marginProduct
-            ? `قیمت پایه «${marginProduct.title}» از ارائه‌دهنده خوانده می‌شود و این حاشیه روی آن اضافه می‌شود.`
+            ? `قیمت پایه «${marginProduct.title}» از ارائه‌دهنده خوانده می‌شود. تا وقتی حاشیه دستی تعیین نکنید، سود خودکار ${formatCount(marginAutoPercent)}٪ پلکانی اعمال می‌شود.`
             : undefined
         }
         className="sm:max-w-md"
@@ -528,7 +583,7 @@ export default function ProductsPage() {
                   closeMarginEditor()
                 }}
               >
-                حذف حاشیه سود
+                حذف حاشیه دستی و بازگشت به سود خودکار
               </Button>
             ) : null}
           </div>
@@ -588,6 +643,17 @@ export default function ProductsPage() {
             error={marginError ?? undefined}
           />
 
+          <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-brand-500/25 bg-brand-500/5 px-3 py-2 text-[12px]">
+            <span className="text-tg-hint">سود خودکار این محصول</span>
+            <span className="font-semibold text-brand-600">
+              {formatCount(marginAutoPercent)}٪ · پایه{' '}
+              <span className="bidi-ltr tabular-nums">
+                {marginProduct ? toPersianDigits(usdPriceOf(marginProduct).toFixed(2)) : '۰'}
+              </span>{' '}
+              دلار
+            </span>
+          </div>
+
           <div className="space-y-1.5 rounded-xl border border-tg-separator bg-tg-secondary-bg/60 p-3 text-[12.5px]">
             <div className="flex items-center justify-between gap-3">
               <span className="text-tg-hint">قیمت پایه ارائه‌دهنده</span>
@@ -612,8 +678,46 @@ export default function ProductsPage() {
           </div>
 
           <p className="text-[11.5px] leading-relaxed text-tg-hint">
-            با ذخیره ۰ حاشیه حذف می‌شود. قیمت نمایش‌داده‌شده به نزدیک‌ترین هزار تومان گرد
-            می‌شود.
+            با ذخیره ۰ حاشیه دستی حذف می‌شود و محصول به سود خودکار پلکانی برمی‌گردد. قیمت
+            نمایش‌داده‌شده به نزدیک‌ترین هزار تومان گرد می‌شود.
+          </p>
+        </div>
+      </Sheet>
+
+      <Sheet
+        open={noteProduct !== null}
+        onClose={closeNoteEditor}
+        title="توضیحات تکمیلی ادمین"
+        description={
+          noteProduct
+            ? `این متن در صفحه جزئیات «${noteProduct.title}» در مینی‌اپ، کنار توضیحات ارائه‌دهنده نمایش داده می‌شود.`
+            : undefined
+        }
+        className="sm:max-w-lg"
+        footer={
+          <div className="flex gap-2">
+            <Button className="flex-1" onClick={handleSaveNote}>
+              ذخیره توضیحات
+            </Button>
+            <Button variant="secondary" onClick={closeNoteEditor}>
+              انصراف
+            </Button>
+          </div>
+        }
+      >
+        <div className="space-y-3">
+          <textarea
+            value={noteValue}
+            onChange={(event) => setNoteValue(event.target.value)}
+            rows={6}
+            dir="auto"
+            aria-label="توضیحات تکمیلی ادمین"
+            placeholder="مثلاً: تحویل حداکثر تا ۳۰ دقیقه پس از پرداخت؛ نیاز به ایمیل شخصی دارد."
+            className="w-full resize-y rounded-xl border border-tg-separator bg-tg-bg px-3.5 py-2.5 text-[13px] leading-relaxed text-tg-text placeholder:text-tg-hint/70 focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500/20"
+          />
+          <p className="text-[11.5px] leading-relaxed text-tg-hint">
+            با خالی گذاشتن این فیلد، توضیحات تکمیلی حذف می‌شود. توضیحات اصلی ارائه‌دهنده
+            دست‌نخورده باقی می‌ماند.
           </p>
         </div>
       </Sheet>

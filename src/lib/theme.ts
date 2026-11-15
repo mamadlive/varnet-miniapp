@@ -1,8 +1,9 @@
-/** Theme primitives shared by the Telegram bridge and the admin toggle. */
+/** Theme primitives shared by the Telegram bridge, the Mini App toggle and the admin toggle. */
 
 export type AppTheme = 'light' | 'dark'
 
 export const ADMIN_THEME_STORAGE_KEY = 'varnet.admin.theme'
+export const MINIAPP_THEME_STORAGE_KEY = 'varnet.miniapp.theme'
 
 const THEME_COLORS: Record<AppTheme, string> = {
   light: '#f1f1f4',
@@ -14,21 +15,38 @@ export function getSystemTheme(): AppTheme {
   return window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'
 }
 
-export function readStoredAdminTheme(): AppTheme | null {
+function readStoredTheme(key: string): AppTheme | null {
   try {
-    const value = window.localStorage.getItem(ADMIN_THEME_STORAGE_KEY)
+    const value = window.localStorage.getItem(key)
     return value === 'light' || value === 'dark' ? value : null
   } catch {
     return null
   }
 }
 
-export function writeStoredAdminTheme(theme: AppTheme): void {
+function writeStoredTheme(key: string, theme: AppTheme): void {
   try {
-    window.localStorage.setItem(ADMIN_THEME_STORAGE_KEY, theme)
+    window.localStorage.setItem(key, theme)
   } catch {
     // Private mode / storage disabled — the current session still works.
   }
+}
+
+export function readStoredAdminTheme(): AppTheme | null {
+  return readStoredTheme(ADMIN_THEME_STORAGE_KEY)
+}
+
+export function writeStoredAdminTheme(theme: AppTheme): void {
+  writeStoredTheme(ADMIN_THEME_STORAGE_KEY, theme)
+}
+
+/** Explicit Mini App choice; it outranks the Telegram client's color scheme. */
+export function readStoredMiniAppTheme(): AppTheme | null {
+  return readStoredTheme(MINIAPP_THEME_STORAGE_KEY)
+}
+
+export function writeStoredMiniAppTheme(theme: AppTheme): void {
+  writeStoredTheme(MINIAPP_THEME_STORAGE_KEY, theme)
 }
 
 /** Apply a palette to <html>; every `tg-*` token and `dark:` utility follows. */

@@ -58,6 +58,13 @@ export interface AccountProduct {
   oldPrice?: number
   /** Provider base price before the admin profit margin, when a margin is set. */
   basePrice?: number
+  /** Raw price reported by the provider, in `providerCurrency` (USDT on Dantehub). */
+  providerPrice?: number
+  /** Raw compare-at price reported by the provider. */
+  providerOldPrice?: number
+  providerCurrency?: string
+  /** Base provider price expressed in USDT (derived by the pricing layer). */
+  usdPrice?: number
   currency: Currency
   stock: number
   rating?: number
@@ -65,6 +72,10 @@ export interface AccountProduct {
   badge?: string
   deliveryTime?: string
   description?: string
+  /** Upstream description kept verbatim alongside the localized copy. */
+  providerDescription?: string
+  /** Admin-authored note shown next to the description in the Mini App. */
+  adminNote?: string
   features?: string[]
   /** Tailwind gradient classes used by the placeholder artwork. */
   gradient?: string

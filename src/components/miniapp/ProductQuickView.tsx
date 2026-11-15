@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { Check, Info, Star, Wallet, Zap } from 'lucide-react'
+import { Check, FileText, Info, Star, StickyNote, Wallet, Zap } from 'lucide-react'
 import { Badge, Button, Sheet } from '@/components/ui'
 import { useTelegram } from '@/hooks/useTelegram'
 import { formatCount, formatCurrency, formatNumber } from '@/lib/format'
@@ -30,6 +30,10 @@ export function ProductQuickView({ product, onClose, onPurchase }: ProductQuickV
   const outOfStock = product.stock <= 0
   const features = product.features ?? []
   const categoryLabel = fa.categories[product.category]
+  const providerDescription =
+    product.providerDescription && product.providerDescription !== product.description
+      ? product.providerDescription
+      : undefined
 
   const handleSelect = () => {
     if (onPurchase) {
@@ -119,6 +123,21 @@ export function ProductQuickView({ product, onClose, onPurchase }: ProductQuickV
           </p>
         ) : null}
 
+        {product.adminNote ? (
+          <div className="rounded-xl border border-brand-500/25 bg-brand-500/5 p-3">
+            <p className="mb-1 flex items-center gap-1.5 text-[11.5px] font-semibold text-brand-600">
+              <StickyNote className="size-3.5" aria-hidden />
+              توضیحات تکمیلی
+            </p>
+            <p
+              dir="auto"
+              className="whitespace-pre-line text-[12.5px] leading-relaxed text-tg-text"
+            >
+              {product.adminNote}
+            </p>
+          </div>
+        ) : null}
+
         {features.length > 0 ? (
           <ul className="grid gap-1.5">
             {features.map((feature) => (
@@ -134,6 +153,21 @@ export function ProductQuickView({ product, onClose, onPurchase }: ProductQuickV
               </li>
             ))}
           </ul>
+        ) : null}
+
+        {providerDescription ? (
+          <details className="group rounded-xl border border-tg-separator bg-tg-bg">
+            <summary className="flex cursor-pointer list-none items-center gap-1.5 px-3 py-2 text-[12px] font-medium text-tg-hint [&::-webkit-details-marker]:hidden">
+              <FileText className="size-3.5 shrink-0" aria-hidden />
+              توضیحات ارائه‌دهنده (متن اصلی)
+            </summary>
+            <p
+              dir="auto"
+              className="max-h-48 overflow-y-auto whitespace-pre-line px-3 pb-3 text-[12px] leading-relaxed text-tg-hint"
+            >
+              {providerDescription}
+            </p>
+          </details>
         ) : null}
 
         <div className="flex items-center justify-between rounded-xl bg-tg-secondary-bg px-3 py-2.5">

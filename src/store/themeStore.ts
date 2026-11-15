@@ -3,7 +3,9 @@ import {
   applyTheme,
   getSystemTheme,
   readStoredAdminTheme,
+  readStoredMiniAppTheme,
   writeStoredAdminTheme,
+  writeStoredMiniAppTheme,
   type AppTheme,
 } from '@/lib/theme'
 import {
@@ -12,7 +14,7 @@ import {
   onTelegramThemeChange,
 } from '@/services/telegram'
 
-type ThemeSource = 'telegram' | 'admin' | 'system'
+type ThemeSource = 'telegram' | 'miniapp' | 'admin' | 'system'
 
 interface ThemeState {
   theme: AppTheme
@@ -20,12 +22,14 @@ interface ThemeState {
   initialized: boolean
   /** Boot: Telegram colorScheme inside the client, stored/system preference otherwise. */
   initTheme: () => void
-  /** Mini App mount: Telegram is authoritative, browser preview follows the OS. */
+  /** Mini App mount: an explicit Mini App choice wins, then Telegram, then the OS. */
   syncMiniApp: () => void
   /** Admin mount: the admin's saved choice wins, then the OS. */
   syncAdmin: () => void
   setAdminTheme: (theme: AppTheme) => void
   toggleAdminTheme: () => void
+  setMiniAppTheme: (theme: AppTheme) => void
+  toggleMiniAppTheme: () => void
 }
 
 let unsubscribeTelegramTheme: (() => void) | null = null
@@ -58,6 +62,8 @@ export const useThemeStore = create<ThemeState>((set, get) => ({
 
       unsubscribeTelegramTheme?.()
       unsubscribeTelegramTheme = onTelegramThemeChange((scheme) => {
+        // An explicit Mini App choice outlives the client's own theme switches.
+        if (get().source === 'miniapp') return
         applyTheme(scheme)
         set({ theme: scheme, source: 'telegram' })
       })
@@ -71,6 +77,12 @@ export const useThemeStore = create<ThemeState>((set, get) => ({
   },
 
   syncMiniApp: () => {
+    const stored = readStoredMiniAppTheme()
+    if (stored) {
+      applyTheme(stored)
+      set({ theme: stored, source: 'miniapp' })
+      return
+    }
     if (isInsideTelegram()) {
       const theme = getTelegramColorScheme()
       applyTheme(theme)
@@ -97,5 +109,15 @@ export const useThemeStore = create<ThemeState>((set, get) => ({
 
   toggleAdminTheme: () => {
     get().setAdminTheme(get().theme === 'dark' ? 'light' : 'dark')
+  },
+
+  setMiniAppTheme: (theme) => {
+    writeStoredMiniAppTheme(theme)
+    applyTheme(theme)
+    set({ theme, source: 'miniapp' })
+  },
+
+  toggleMiniAppTheme: () => {
+    get().setMiniAppTheme(get().theme === 'dark' ? 'light' : 'dark')
   },
 }))

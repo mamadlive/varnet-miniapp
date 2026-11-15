@@ -254,11 +254,382 @@ const BRANDS: BrandRule[] = [
     name: 'زوم',
     category: 'other',
   },
+  {
+    aliases: ['hulu'],
+    name: 'هولو',
+    category: 'streaming',
+  },
+  {
+    aliases: ['apple tv plus', 'apple tv+', 'apple tv'],
+    name: 'اپل تی‌وی',
+    category: 'streaming',
+  },
+  {
+    aliases: ['peacock'],
+    name: 'پیکاک',
+    category: 'streaming',
+  },
+  {
+    aliases: ['starz'],
+    name: 'استارز',
+    category: 'streaming',
+  },
+  {
+    aliases: ['showtime'],
+    name: 'شوتایم',
+    category: 'streaming',
+  },
+  {
+    aliases: ['tidal'],
+    name: 'تایدال',
+    category: 'streaming',
+  },
+  {
+    aliases: ['deezer'],
+    name: 'دیزر',
+    category: 'streaming',
+  },
+  {
+    aliases: ['audible'],
+    name: 'آدیبل',
+    category: 'streaming',
+  },
+  {
+    aliases: ['kindle unlimited', 'kindle'],
+    name: 'کیندل',
+    category: 'other',
+  },
+  {
+    aliases: ['shahid'],
+    name: 'شاهد',
+    category: 'streaming',
+  },
+  {
+    aliases: ['rakuten viki', 'viki'],
+    name: 'ویکی',
+    category: 'streaming',
+  },
+  {
+    aliases: ['zee5', 'zee 5'],
+    name: 'زی۵',
+    category: 'streaming',
+  },
+  {
+    aliases: ['mubi'],
+    name: 'موبی',
+    category: 'streaming',
+  },
+  {
+    aliases: ['iqiyi'],
+    name: 'آی‌کیو',
+    category: 'streaming',
+  },
+  {
+    aliases: ['wetv', 'we tv'],
+    name: 'وی‌تی‌وی',
+    category: 'streaming',
+  },
+  {
+    aliases: ['tubi'],
+    name: 'توبی',
+    category: 'streaming',
+  },
+  {
+    aliases: ['discovery plus', 'discovery+', 'discovery'],
+    name: 'دیسکاوری پلاس',
+    category: 'streaming',
+  },
+  {
+    aliases: ['britbox'],
+    name: 'بریت‌باکس',
+    category: 'streaming',
+  },
+  {
+    aliases: ['grok', 'xai', 'x.ai'],
+    name: 'گروک',
+    category: 'ai',
+  },
+  {
+    aliases: ['cursor'],
+    name: 'کرسر',
+    category: 'ai',
+  },
+  {
+    aliases: ['elevenlabs', 'eleven labs'],
+    name: 'الون‌لبز',
+    category: 'ai',
+  },
+  {
+    aliases: ['runway'],
+    name: 'رانوی',
+    category: 'ai',
+  },
+  {
+    aliases: ['suno'],
+    name: 'سونو',
+    category: 'ai',
+  },
+  {
+    aliases: ['deepseek', 'deep seek'],
+    name: 'دیپ‌سیک',
+    category: 'ai',
+  },
+  {
+    aliases: ['microsoft copilot', 'copilot'],
+    name: 'کوپایلوت',
+    category: 'ai',
+  },
+  {
+    aliases: ['gamma'],
+    name: 'گاما',
+    category: 'ai',
+  },
+  {
+    aliases: ['leonardo ai', 'leonardo'],
+    name: 'لئوناردو',
+    category: 'ai',
+  },
+  {
+    aliases: ['ideogram'],
+    name: 'آیدیوگرام',
+    category: 'ai',
+  },
+  {
+    aliases: ['heygen', 'heygen ai'],
+    name: 'هی‌جن',
+    category: 'ai',
+  },
+  {
+    aliases: ['kling ai', 'kling'],
+    name: 'کلینگ',
+    category: 'ai',
+  },
+  {
+    aliases: ['notion'],
+    name: 'نوشن',
+    category: 'other',
+  },
+  {
+    aliases: ['roblox', 'robux'],
+    name: 'رابلاکس',
+    category: 'gaming',
+  },
+  {
+    aliases: ['minecraft'],
+    name: 'ماینکرفت',
+    category: 'gaming',
+  },
+  {
+    aliases: ['fortnite', 'v-bucks', 'vbucks'],
+    name: 'فورتنایت',
+    category: 'gaming',
+  },
+  {
+    aliases: ['valorant', 'riot points', 'riot games'],
+    name: 'والورانت',
+    category: 'gaming',
+  },
+  {
+    aliases: ['league of legends'],
+    name: 'لیگ آو لجندز',
+    category: 'gaming',
+  },
+  {
+    aliases: ['genshin impact', 'genshin'],
+    name: 'گنشین ایمپکت',
+    category: 'gaming',
+  },
+  {
+    aliases: ['epic games'],
+    name: 'اپیک گیمز',
+    category: 'gaming',
+  },
+  {
+    aliases: ['ea play', 'ea sports'],
+    name: 'ای‌ای پلی',
+    category: 'gaming',
+  },
+  {
+    aliases: ['ubisoft plus', 'ubisoft+', 'ubisoft'],
+    name: 'یوبی‌سافت',
+    category: 'gaming',
+  },
+  {
+    aliases: ['battle.net', 'blizzard'],
+    name: 'بلیزارد',
+    category: 'gaming',
+  },
+  {
+    aliases: ['razer gold', 'razer'],
+    name: 'ریزر گلد',
+    category: 'gaming',
+  },
+  {
+    aliases: ['pubg'],
+    name: 'پابجی',
+    category: 'gaming',
+  },
+  {
+    aliases: ['free fire'],
+    name: 'فری فایر',
+    category: 'gaming',
+  },
+  {
+    aliases: ['framer'],
+    name: 'فریمر',
+    category: 'design',
+  },
+  {
+    aliases: ['quillbot'],
+    name: 'کوئیل‌بات',
+    category: 'other',
+  },
+  {
+    aliases: ['tiktok'],
+    name: 'تیک‌تاک',
+    category: 'social',
+  },
+  {
+    aliases: ['facebook'],
+    name: 'فیسبوک',
+    category: 'social',
+  },
+  {
+    aliases: ['reddit'],
+    name: 'ردیت',
+    category: 'social',
+  },
+  {
+    aliases: ['pinterest'],
+    name: 'پینترست',
+    category: 'social',
+  },
+  {
+    aliases: ['threads'],
+    name: 'تردز',
+    category: 'social',
+  },
+  {
+    aliases: ['whatsapp'],
+    name: 'واتس‌اپ',
+    category: 'social',
+  },
+  {
+    aliases: ['surfshark'],
+    name: 'سرف‌شارک',
+    category: 'other',
+  },
+  {
+    aliases: ['proton vpn', 'protonvpn', 'proton mail', 'proton'],
+    name: 'پروتون',
+    category: 'other',
+  },
+  {
+    aliases: ['1password'],
+    name: 'وان‌پسورد',
+    category: 'other',
+  },
+  {
+    aliases: ['bitwarden'],
+    name: 'بیت‌واردن',
+    category: 'other',
+  },
+  {
+    aliases: ['adguard'],
+    name: 'ادگارد',
+    category: 'other',
+  },
+  {
+    aliases: ['google workspace', 'gsuite'],
+    name: 'گوگل ورک‌اسپیس',
+    category: 'other',
+  },
+  {
+    aliases: ['dropbox'],
+    name: 'دراپ‌باکس',
+    category: 'other',
+  },
+  {
+    aliases: ['onedrive'],
+    name: 'وان‌درایو',
+    category: 'other',
+  },
+  {
+    aliases: ['mega.nz', 'mega cloud'],
+    name: 'مگا',
+    category: 'other',
+  },
+  {
+    aliases: ['coursera'],
+    name: 'کورسرا',
+    category: 'other',
+  },
+  {
+    aliases: ['udemy'],
+    name: 'یودمی',
+    category: 'other',
+  },
+  {
+    aliases: ['skillshare'],
+    name: 'اسکیل‌شیر',
+    category: 'other',
+  },
+  {
+    aliases: ['masterclass'],
+    name: 'مسترکلاس',
+    category: 'other',
+  },
+  {
+    aliases: ['babbel'],
+    name: 'بابل',
+    category: 'other',
+  },
 ]
 
 const BRAND_ALIASES = BRANDS.flatMap((brand) =>
   brand.aliases.map((alias) => ({ alias, brand })),
 ).sort((a, b) => b.alias.length - a.alias.length)
+
+/** Category hints used when the provider files a product under «other». */
+const CATEGORY_KEYWORDS: Array<{ tokens: string[]; category: ProductCategory }> = [
+  {
+    tokens: ['ai', 'gpt', 'llm', 'chatbot', 'image generator', 'text to video', 'ai tools'],
+    category: 'ai',
+  },
+  {
+    tokens: ['streaming', 'music', 'movie', 'series', 'tv', 'anime', 'podcast'],
+    category: 'streaming',
+  },
+  {
+    tokens: ['in game', 'v bucks', 'top up', 'game pass', 'gaming'],
+    category: 'gaming',
+  },
+  {
+    tokens: ['design', 'template', 'photo editor', 'video editor', 'mockup', 'font'],
+    category: 'design',
+  },
+  {
+    tokens: ['followers', 'likes', 'views', 'verification', 'social media', 'booster'],
+    category: 'social',
+  },
+]
+
+function resolveCategory(
+  title: string,
+  subtitle: string | undefined,
+  provided: ProductCategory,
+): ProductCategory {
+  if (provided !== 'other') return provided
+
+  const text = normalize(`${title} ${subtitle ?? ''}`)
+  const brandCategory = matchBrand(text)?.category
+  if (brandCategory) return brandCategory
+
+  return (
+    CATEGORY_KEYWORDS.find((entry) => entry.tokens.some((token) => hasToken(text, token)))
+      ?.category ?? 'other'
+  )
+}
 
 const TIER_RULES: Array<{ tokens: string[]; label: string }> = [
   { tokens: ['ultimate'], label: 'اولتیمیت' },
@@ -437,10 +808,6 @@ function matchTitleExtra(text: string): string | undefined {
   return TITLE_EXTRAS.find((entry) => entry.tokens.some((token) => hasToken(text, token)))?.label
 }
 
-function matchKind(text: string): string | undefined {
-  return KIND_RULES.find((rule) => rule.tokens.some((token) => hasToken(text, token)))?.label
-}
-
 function matchRegion(text: string): string | undefined {
   const rule = REGION_RULES.find((entry) =>
     entry.tokens.some((token) => hasToken(text, token)),
@@ -478,6 +845,25 @@ function parseAmount(text: string): string | undefined {
   return dollar ? `${toPersianDigits(dollar[1]!)} دلاری` : undefined
 }
 
+/**
+ * Unknown brands keep their upstream English name instead of collapsing into
+ * «محصول دیجیتال»; duration/region noise is stripped because it is re-appended
+ * in Persian.
+ */
+function englishFallbackTitle(raw: string): string {
+  const cleaned = raw
+    .replace(/[_/|]+/g, ' ')
+    .replace(
+      /\b\d+\s*(?:years?|yrs?|y|months?|mon|mo|m|days?|d|hours?|hrs?|minutes?|mins?)\b/gi,
+      ' ',
+    )
+    .replace(/\b(?:global|worldwide|all regions)\b/gi, ' ')
+    .replace(/\b(?:instant|immediate)\s+(?:delivery|activation)\b/gi, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+  return cleaned || raw.trim()
+}
+
 function localizeTitle(raw: string, category: ProductCategory): string {
   if (!raw.trim()) return CATEGORY_TITLES[category]
   if (PERSIAN_RE.test(raw) && !LATIN_RE.test(raw)) return raw.trim()
@@ -498,8 +884,17 @@ function localizeTitle(raw: string, category: ProductCategory): string {
     parts.push(brand.name)
     if (tier && !brand.name.includes(tier)) parts.push(tier)
   } else {
-    parts.push(matchKind(text) ?? CATEGORY_TITLES[category])
-    if (tier) parts.push(tier)
+    const fallback = englishFallbackTitle(raw)
+    const kindRule = KIND_RULES.find((rule) =>
+      rule.tokens.some((token) => hasToken(text, token)),
+    )
+    const nameHasKind =
+      kindRule?.tokens.some((token) => hasToken(normalize(fallback), token)) ?? false
+    parts.push(kindRule && !nameHasKind ? `${kindRule.label} ${fallback}` : fallback)
+    const tierRule = TIER_RULES.find((rule) => rule.label === tier)
+    const nameHasTier =
+      tierRule?.tokens.some((token) => hasToken(normalize(fallback), token)) ?? false
+    if (tier && !nameHasTier) parts.push(tier)
   }
 
   if (extra) parts.push(extra)
@@ -617,14 +1012,24 @@ function localizeDeliveryTime(raw: string | undefined): string | undefined {
 
 /** Localize every customer-facing field of one provider product. */
 export function localizeProviderProduct(product: AccountProduct): AccountProduct {
-  const title = localizeTitle(product.title, product.category)
+  // The provider files many brands under «other»; the title usually knows better.
+  const category = resolveCategory(product.title, product.subtitle, product.category)
+  const title = localizeTitle(product.title, category)
+  const description = localizeDescription(product.description, category, title)
+  const rawDescription = product.description?.trim()
 
   return {
     ...product,
+    category,
     title,
-    subtitle: localizeSubtitle(product.subtitle, product.category),
-    description: localizeDescription(product.description, product.category, title),
-    features: localizeFeatures(product.features, product.category),
+    subtitle: localizeSubtitle(product.subtitle, category),
+    description,
+    // The localized copy is generated for unrecognized English prose, so the
+    // upstream text is kept verbatim for the product details sheet.
+    providerDescription:
+      product.providerDescription ??
+      (rawDescription && rawDescription !== description ? rawDescription : undefined),
+    features: localizeFeatures(product.features, category),
     badge: localizeBadge(product.badge),
     deliveryTime: localizeDeliveryTime(product.deliveryTime),
   }

@@ -48,6 +48,14 @@ interface AdminState {
   products: AccountProduct[]
   /** Provider base price → customer price markups, keyed by product id. */
   margins: Record<string, ProfitMargin>
+  /** Admin USDT→Toman rate; `0` keeps the server-side `USDT_RATE_TOMAN`. */
+  usdtRateToman: number
+  /** Rate last reported by the proxy, used when no admin override is set. */
+  serverUsdtRateToman: number
+  /** Free-form admin notes per product, shown beside the provider copy. */
+  productNotes: Record<string, string>
+  /** Products removed from the Mini App storefront (still visible to admin). */
+  hiddenProductIds: string[]
   /** Manual bank-transfer destination shown to customers in «افزایش موجودی». */
   bankDetails: BankAccountDetails
   /** Shared inbox — the Mini App opens tickets, the admin panel answers them. */
@@ -63,6 +71,11 @@ interface AdminState {
   removeCoupon: (id: string) => void
   setProducts: (products: AccountProduct[]) => void
   setMargin: (productId: string, margin: ProfitMargin | null) => void
+  /** `0` clears the override so the server-side `USDT_RATE_TOMAN` is used again. */
+  setUsdtRateToman: (rate: number) => void
+  setServerUsdtRateToman: (rate: number) => void
+  setProductNote: (productId: string, note: string) => void
+  toggleProductHidden: (productId: string) => void
   saveBankDetails: (details: Omit<BankAccountDetails, 'updatedAt'>) => void
   createTicket: (input: CreateTicketInput) => SupportTicket
   replyToTicket: (id: string, body: string, author: TicketAuthor) => void
@@ -74,12 +87,19 @@ interface AdminState {
 
 const EMPTY_CREDENTIAL: ProviderCredential = { value: '', updatedAt: null }
 
+/** Keeps the tier ladder working before the first sync reports the live rate. */
+const DEFAULT_SERVER_USDT_RATE_TOMAN = 70_000
+
 export const useAdminStore = create<AdminState>()(
   persist(
     (set) => ({
       coupons: mockCoupons,
       products: mockAccountProducts,
       margins: mockProfitMargins,
+      usdtRateToman: 0,
+      serverUsdtRateToman: DEFAULT_SERVER_USDT_RATE_TOMAN,
+      productNotes: {},
+      hiddenProductIds: [],
       bankDetails: mockBankDetails,
       tickets: mockSupportTickets,
       broadcasts: mockBroadcasts,
@@ -124,6 +144,33 @@ export const useAdminStore = create<AdminState>()(
           else delete margins[productId]
           return { margins }
         })
+      },
+
+      setUsdtRateToman: (rate) => {
+        set({ usdtRateToman: Number.isFinite(rate) && rate > 0 ? Math.round(rate) : 0 })
+      },
+
+      setServerUsdtRateToman: (rate) => {
+        if (!Number.isFinite(rate) || rate <= 0) return
+        set({ serverUsdtRateToman: Math.round(rate) })
+      },
+
+      setProductNote: (productId, note) => {
+        const trimmed = note.trim()
+        set((state) => {
+          const productNotes = { ...state.productNotes }
+          if (trimmed) productNotes[productId] = trimmed
+          else delete productNotes[productId]
+          return { productNotes }
+        })
+      },
+
+      toggleProductHidden: (productId) => {
+        set((state) => ({
+          hiddenProductIds: state.hiddenProductIds.includes(productId)
+            ? state.hiddenProductIds.filter((id) => id !== productId)
+            : [...state.hiddenProductIds, productId],
+        }))
       },
 
       saveBankDetails: (details) => {
@@ -227,6 +274,10 @@ export const useAdminStore = create<AdminState>()(
         coupons: state.coupons,
         products: state.products,
         margins: state.margins,
+        usdtRateToman: state.usdtRateToman,
+        serverUsdtRateToman: state.serverUsdtRateToman,
+        productNotes: state.productNotes,
+        hiddenProductIds: state.hiddenProductIds,
         bankDetails: state.bankDetails,
         tickets: state.tickets,
         broadcasts: state.broadcasts,

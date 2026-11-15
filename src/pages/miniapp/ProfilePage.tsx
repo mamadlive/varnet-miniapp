@@ -6,11 +6,13 @@ import {
   Info,
   Languages,
   LifeBuoy,
+  Moon,
   ReceiptText,
   ScrollText,
   Send,
   ShieldCheck,
   Star,
+  Sun,
   Wallet,
 } from 'lucide-react'
 
@@ -19,12 +21,14 @@ import { Badge } from '@/components/ui/Badge'
 import { Button } from '@/components/ui/Button'
 import { Card } from '@/components/ui/Card'
 import { Sheet } from '@/components/ui/Sheet'
+import { Switch } from '@/components/ui/Switch'
 import { env } from '@/config/env'
 import { useTelegram } from '@/hooks/useTelegram'
 import { formatCurrency } from '@/lib/format'
 import { fa } from '@/lib/i18n'
 import { initials } from '@/lib/utils'
 import { useAuthStore } from '@/store/authStore'
+import { useThemeStore } from '@/store/themeStore'
 import { useWalletStore } from '@/store/walletStore'
 
 type ProfileSheet = 'language' | 'about'
@@ -119,6 +123,9 @@ export default function ProfilePage() {
   const loadWallet = useWalletStore((state) => state.loadWallet)
 
   const { isTelegram, user: telegramUser, haptic } = useTelegram()
+  const theme = useThemeStore((state) => state.theme)
+  const toggleMiniAppTheme = useThemeStore((state) => state.toggleMiniAppTheme)
+  const isDark = theme === 'dark'
 
   const [sheet, setSheet] = useState<ProfileSheet | null>(null)
   const [avatarFailed, setAvatarFailed] = useState(false)
@@ -273,6 +280,25 @@ export default function ProfilePage() {
             hint={INTERFACE_LANGUAGE}
             onClick={() => openSheet('language')}
           />
+          <div className={MENU_ROW_CLASS}>
+            <span className="flex size-9 shrink-0 items-center justify-center rounded-xl bg-brand-500/10 text-brand-600">
+              {isDark ? (
+                <Moon className="size-[18px]" aria-hidden />
+              ) : (
+                <Sun className="size-[18px]" aria-hidden />
+              )}
+            </span>
+            <span className="flex-1 text-[14.5px] font-medium text-tg-text">حالت نمایش</span>
+            <span className="text-[12px] text-tg-hint">{isDark ? 'تاریک' : 'روشن'}</span>
+            <Switch
+              checked={isDark}
+              label={isDark ? 'تغییر به حالت روشن' : 'تغییر به حالت تاریک'}
+              onCheckedChange={() => {
+                haptic()
+                toggleMiniAppTheme()
+              }}
+            />
+          </div>
           <MenuRow icon={Info} label="درباره" hint={APP_VERSION} onClick={() => openSheet('about')} />
         </Card>
       </div>

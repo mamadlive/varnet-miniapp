@@ -35,8 +35,8 @@ export default function MiniAppLayout() {
   const syncMiniAppTheme = useThemeStore((state) => state.syncMiniApp)
   const showDemoChip = env.demoMode && !isTelegram
 
-  // Inside Telegram the client palette is authoritative; a browser preview
-  // follows the OS so the admin's dark choice never leaks into the storefront.
+  // An explicit Mini App choice wins; otherwise the Telegram client palette is
+  // authoritative and a browser preview follows the OS.
   useEffect(() => {
     syncMiniAppTheme()
   }, [isTelegram, syncMiniAppTheme])

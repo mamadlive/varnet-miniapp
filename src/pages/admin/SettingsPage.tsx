@@ -2,6 +2,7 @@ import { useState } from 'react'
 import type { LucideIcon } from 'lucide-react'
 import {
   CheckCircle2,
+  Coins,
   CreditCard,
   Eye,
   EyeOff,
@@ -22,10 +23,12 @@ import { Input } from '@/components/ui/Input'
 import {
   formatCardNumber,
   formatCount,
+  formatCurrency,
   formatDateTime,
   maskSecret,
   normalizeCardNumber,
 } from '@/lib/format'
+import { AUTO_MARGIN_TIERS } from '@/lib/pricing'
 import { useAdminStore } from '@/store/adminStore'
 import type { ProviderKeyId } from '@/store/adminStore'
 
@@ -305,6 +308,164 @@ function BankTransferCard() {
   )
 }
 
+const MIN_USDT_RATE = 10_000
+const MAX_USDT_RATE = 5_000_000
+
+/** «کمتر از ۱ دلار»، «۱ تا ۲ دلار»، «۸ دلار و بیشتر». */
+function tierRangeLabel(index: number): string {
+  const entry = AUTO_MARGIN_TIERS[index]!
+  if (entry.upToUsd === null) {
+    return `${formatCount(AUTO_MARGIN_TIERS[index - 1]!.upToUsd!)} دلار و بیشتر`
+  }
+  if (index === 0) return `کمتر از ${formatCount(entry.upToUsd)} دلار`
+  return `${formatCount(AUTO_MARGIN_TIERS[index - 1]!.upToUsd!)} تا ${formatCount(entry.upToUsd)} دلار`
+}
+
+/**
+ * Toman-per-USDT override for the provider catalogue. The proxy keeps its own
+ * `USDT_RATE_TOMAN`, but a saved rate here reprices every product client-side.
+ */
+function UsdtRateCard() {
+  const usdtRateToman = useAdminStore((state) => state.usdtRateToman)
+  const serverUsdtRateToman = useAdminStore((state) => state.serverUsdtRateToman)
+  const setUsdtRateToman = useAdminStore((state) => state.setUsdtRateToman)
+
+  const [value, setValue] = useState(usdtRateToman > 0 ? String(usdtRateToman) : '')
+  const [error, setError] = useState<string | null>(null)
+  const [saved, setSaved] = useState(false)
+
+  const overridden = usdtRateToman > 0
+  const effectiveRate = overridden ? usdtRateToman : serverUsdtRateToman
+
+  const flashSaved = () => {
+    setSaved(true)
+    window.setTimeout(() => setSaved(false), 3200)
+  }
+
+  const handleSave = () => {
+    const rate = Number(value.replace(/[,\u066C\s]/g, ''))
+    if (!Number.isFinite(rate) || rate <= 0) {
+      setError('یک نرخ معتبر وارد کنید.')
+      return
+    }
+    if (rate < MIN_USDT_RATE || rate > MAX_USDT_RATE) {
+      setError(
+        `نرخ باید بین ${formatCurrency(MIN_USDT_RATE)} و ${formatCurrency(MAX_USDT_RATE)} باشد.`,
+      )
+      return
+    }
+    setUsdtRateToman(rate)
+    setValue(String(Math.round(rate)))
+    setError(null)
+    flashSaved()
+  }
+
+  const handleReset = () => {
+    setUsdtRateToman(0)
+    setValue('')
+    setError(null)
+    flashSaved()
+  }
+
+  return (
+    <Card className="space-y-3">
+      <div className="flex items-start gap-3">
+        <span className="flex size-10 shrink-0 items-center justify-center rounded-xl bg-brand-500/10 text-brand-600">
+          <Coins className="size-5" aria-hidden />
+        </span>
+        <div className="min-w-0 flex-1">
+          <div className="flex flex-wrap items-center gap-2">
+            <h2 className="text-[14.5px] font-semibold text-tg-text">نرخ تتر (USDT)</h2>
+            <Badge tone={overridden ? 'brand' : 'neutral'} size="sm">
+              {overridden ? 'نرخ دستی' : 'نرخ سرور'}
+            </Badge>
+            {saved ? (
+              <span className="inline-flex items-center gap-1 text-[11px] font-medium text-emerald-600">
+                <CheckCircle2 className="size-3.5" aria-hidden />
+                ذخیره شد
+              </span>
+            ) : null}
+          </div>
+          <p className="mt-1 text-[12px] leading-relaxed text-tg-hint">
+            قیمت پایه کاتالوگ ارائه‌دهنده به دلار دیجیتال (USDT) است. نرخ واردشده در این کارت
+            جایگزین مقدار <span className="bidi-ltr font-mono">USDT_RATE_TOMAN</span> کلادفلر
+            می‌شود و روی همه محصولات اعمال می‌گردد.
+          </p>
+        </div>
+      </div>
+
+      <div className="flex flex-col gap-2 sm:flex-row sm:items-start">
+        <Input
+          label="نرخ تبدیل (تومان برای هر تتر)"
+          inputMode="numeric"
+          value={value}
+          onChange={(event) => {
+            setValue(event.target.value)
+            setError(null)
+          }}
+          placeholder={String(serverUsdtRateToman)}
+          className="tabular-nums"
+          wrapperClassName="flex-1"
+          error={error ?? undefined}
+          hint={`نرخ مؤثر فعلی: ${formatCurrency(effectiveRate)}`}
+        />
+
+        <div className="flex shrink-0 items-center gap-2 sm:pt-[1.65rem]">
+          <Button onClick={handleSave} disabled={!value.trim()} leftIcon={<Save className="size-4" />}>
+            ذخیره نرخ
+          </Button>
+          <Button
+            variant="secondary"
+            onClick={handleReset}
+            disabled={!overridden}
+            title="بازگشت به نرخ سرور"
+          >
+            نرخ سرور
+          </Button>
+        </div>
+      </div>
+
+      <div className="grid gap-2 sm:grid-cols-2">
+        <div className="flex items-center justify-between rounded-xl bg-tg-secondary-bg px-3 py-2">
+          <span className="text-[12px] text-tg-hint">نرخ سرور (کلادفلر)</span>
+          <span className="text-[12.5px] font-semibold tabular-nums text-tg-text">
+            {formatCurrency(serverUsdtRateToman)}
+          </span>
+        </div>
+        <div className="flex items-center justify-between rounded-xl bg-tg-secondary-bg px-3 py-2">
+          <span className="text-[12px] text-tg-hint">نرخ اعمال‌شده</span>
+          <span className="text-[12.5px] font-semibold tabular-nums text-brand-600">
+            {formatCurrency(effectiveRate)}
+          </span>
+        </div>
+      </div>
+
+      <div>
+        <p className="mb-1.5 text-[12px] font-medium text-tg-hint">
+          سود پلکانی خودکار (بر اساس قیمت پایه تتر)
+        </p>
+        <ul className="divide-y divide-tg-separator overflow-hidden rounded-xl border border-tg-separator text-[12px]">
+          {AUTO_MARGIN_TIERS.map((tier, index) => (
+            <li
+              key={tier.percent}
+              className="flex items-center justify-between px-3 py-1.5"
+            >
+              <span className="text-tg-hint">{tierRangeLabel(index)}</span>
+              <span className="font-semibold tabular-nums text-tg-text">
+                {formatCount(tier.percent)}٪
+              </span>
+            </li>
+          ))}
+        </ul>
+        <p className="mt-1.5 text-[11.5px] leading-relaxed text-tg-hint/80">
+          این درصدها به‌صورت خودکار روی همه محصولات اعمال می‌شوند؛ حاشیه سود دستی هر محصول در
+          صفحه «محصولات» اولویت دارد.
+        </p>
+      </div>
+    </Card>
+  )
+}
+
 /**
  * Provider credentials + integration routing.
  *
@@ -346,6 +507,8 @@ export default function SettingsPage() {
       </Card>
 
       <BankTransferCard />
+
+      <UsdtRateCard />
 
       <div className="grid gap-4 xl:grid-cols-2">
         {PROVIDERS.map((provider) => (

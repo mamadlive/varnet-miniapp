@@ -30,6 +30,41 @@ export function profitAmount(basePrice: number, margin?: ProfitMargin): number {
   return applyProfitMargin(basePrice, margin) - basePrice
 }
 
+/**
+ * Automatic margin ladder keyed by the provider's USDT base price.
+ * The requested $3–$4 and $6–$7 gaps use the midpoint of their neighbours.
+ */
+export interface AutoMarginTier {
+  /** Exclusive upper bound in USDT; `null` means "and above". */
+  upToUsd: number | null
+  percent: number
+}
+
+export const AUTO_MARGIN_TIERS: AutoMarginTier[] = [
+  { upToUsd: 1, percent: 70 },
+  { upToUsd: 2, percent: 60 },
+  { upToUsd: 3, percent: 50 },
+  { upToUsd: 4, percent: 45 },
+  { upToUsd: 5, percent: 40 },
+  { upToUsd: 6, percent: 30 },
+  { upToUsd: 7, percent: 25 },
+  { upToUsd: 8, percent: 20 },
+  { upToUsd: null, percent: 15 },
+]
+
+/** Margin percent for a USDT price; non-positive input falls into the top tier. */
+export function autoMarginPercentForUsd(usdPrice: number): number {
+  const price = Number.isFinite(usdPrice) && usdPrice > 0 ? usdPrice : 0
+  const tier = AUTO_MARGIN_TIERS.find(
+    (entry) => entry.upToUsd === null || price < entry.upToUsd,
+  )
+  return tier?.percent ?? AUTO_MARGIN_TIERS[AUTO_MARGIN_TIERS.length - 1]!.percent
+}
+
+export function autoMarginForUsd(usdPrice: number): ProfitMargin {
+  return { type: 'percent', value: autoMarginPercentForUsd(usdPrice) }
+}
+
 export function isCouponExpired(coupon: Coupon): boolean {
   if (!coupon.expiresAt) return false
   const expiresAt = new Date(coupon.expiresAt).getTime()
