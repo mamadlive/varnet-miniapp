@@ -63,8 +63,12 @@ export const useThemeStore = create<ThemeState>((set, get) => ({
 
       unsubscribeTelegramTheme?.()
       unsubscribeTelegramTheme = onTelegramThemeChange((scheme) => {
-        // An explicit Mini App choice outlives the client's own theme switches.
-        if (get().source === 'miniapp') return
+        // An explicit Mini App choice outranks the client: keep its class and
+        // inline `!important` tokens authoritative even after the event.
+        if (get().source === 'miniapp') {
+          applyExplicitTheme(get().theme)
+          return
+        }
         applyAdaptiveTheme(scheme)
         set({ theme: scheme, source: 'telegram' })
       })

@@ -115,55 +115,6 @@ export function onTelegramThemeChange(handler: (scheme: 'light' | 'dark') => voi
   }
 }
 
-export interface ContactRequestResult {
-  status: 'sent' | 'cancelled' | 'unsupported'
-  phoneNumber?: string
-}
-
-/**
- * Ask the user to share their phone number through Telegram's native contact
- * dialog (`WebApp.requestContact`, Bot API 6.9+). Resolves `unsupported`
- * outside Telegram or on old clients; never throws.
- */
-export function requestPhoneNumber(timeoutMs = 120_000): Promise<ContactRequestResult> {
-  return new Promise((resolve) => {
-    const app = webApp as unknown as {
-      requestContact?: (
-        callback: (shared: boolean, data?: { contact?: { phone_number?: string } }) => void,
-      ) => void
-    }
-
-    if (typeof app?.requestContact !== 'function') {
-      resolve({ status: 'unsupported' })
-      return
-    }
-
-    let settled = false
-    let timer: number | undefined
-    const finish = (result: ContactRequestResult) => {
-      if (settled) return
-      settled = true
-      if (timer !== undefined) window.clearTimeout(timer)
-      resolve(result)
-    }
-
-    timer = window.setTimeout(() => finish({ status: 'cancelled' }), timeoutMs)
-
-    try {
-      app.requestContact((shared, data) => {
-        if (!shared) {
-          finish({ status: 'cancelled' })
-          return
-        }
-        const phoneNumber = data?.contact?.phone_number?.replace(/\s+/g, ' ').trim()
-        finish({ status: 'sent', phoneNumber: phoneNumber || undefined })
-      })
-    } catch {
-      finish({ status: 'unsupported' })
-    }
-  })
-}
-
 /**
  * Boot the Mini App: tell Telegram the UI is ready, force full height, theme
  * the native header and stop vertical swipe-to-close on inner scroll areas.

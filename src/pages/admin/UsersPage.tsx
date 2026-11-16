@@ -78,20 +78,6 @@ function buildUserColumns(onAdjust: (user: User) => void): DataTableColumn<User>
       render: (user) => <RoleBadge role={user.role} />,
     },
     {
-      key: 'verified',
-      header: 'احراز هویت',
-      render: (user) => (
-        <div className="flex items-center gap-2">
-          <Badge tone={user.verified ? 'success' : 'warning'} size="sm">
-            {user.verified ? 'تأیید شده' : 'تأیید نشده'}
-          </Badge>
-          {user.phoneNumber ? (
-            <span className="bidi-ltr text-[11px] tabular-nums text-tg-hint">{user.phoneNumber}</span>
-          ) : null}
-        </div>
-      ),
-    },
-    {
       key: 'balance',
       header: 'موجودی',
       align: 'right',

@@ -3,11 +3,7 @@ import { env } from '@/config/env'
 import { mockTelegramUser, mockUsers } from '@/services/mocks'
 import { setApiAuthToken, onUnauthorized, isApiError } from '@/services/apiClient'
 import { authenticateTelegram } from '@/services/auth.service'
-import {
-  getTelegramInitData,
-  isInsideTelegram,
-  requestPhoneNumber,
-} from '@/services/telegram'
+import { getTelegramInitData, isInsideTelegram } from '@/services/telegram'
 import type { TelegramUser, User } from '@/types'
 
 /**
@@ -18,6 +14,9 @@ import type { TelegramUser, User } from '@/types'
  *   2. `POST /api/auth/telegram` verifies it server-side, upserts the user in
  *      D1 and returns the authoritative user (role included) plus a token.
  *   3. The real user is stored; demo state is never used inside Telegram.
+ *
+ * A valid signed `initData` is the only identity proof — there is no phone or
+ * KYC step, so every authenticated Telegram account can buy immediately.
  *
  * Only when the app is opened in a plain browser (no Telegram context) does
  * `VITE_DEMO_MODE=true` seed a limited demo session.
@@ -39,8 +38,6 @@ interface AuthState {
   setSession: (payload: { user: User; token: string }) => void
   setUser: (user: User | null) => void
   setWalletBalance: (balance: number) => void
-  /** Complete phone-based KYC (native Telegram contact sharing, or demo fallback). */
-  verifyWithPhone: () => Promise<void>
   clearSession: () => void
 }
 
@@ -55,7 +52,6 @@ export function mapTelegramUser(telegramUser: TelegramUser, role: User['role'] =
     role,
     balance: 0,
     currency: 'IRT',
-    verified: false,
     createdAt: new Date().toISOString(),
   }
 }
@@ -185,37 +181,6 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     const user = get().user
     if (!user) return
     set({ user: { ...user, balance } })
-  },
-
-  verifyWithPhone: async () => {
-    const user = get().user
-    if (!user) throw new Error('برای احراز هویت باید وارد حساب شوید.')
-    if (user.verified) return
-
-    const insideTelegram = isInsideTelegram()
-    const result = await requestPhoneNumber()
-
-    let phoneNumber: string | undefined
-    if (result.status === 'sent') {
-      phoneNumber = result.phoneNumber ?? 'ثبت‌شده در تلگرام'
-    } else if (!insideTelegram && env.demoMode) {
-      // Browser preview has no native contact dialog — simulate a verified
-      // phone so the purchase gate can still be reviewed end to end.
-      phoneNumber = '+98 912 555 0147'
-    } else if (result.status === 'cancelled') {
-      throw new Error('اشتراک‌گذاری شماره لغو شد. برای خرید، شماره خود را تأیید کنید.')
-    } else {
-      throw new Error('اشتراک‌گذاری شماره فقط داخل تلگرام ممکن است.')
-    }
-
-    set({
-      user: {
-        ...get().user!,
-        verified: true,
-        phoneNumber,
-        verifiedAt: new Date().toISOString(),
-      },
-    })
   },
 
   clearSession: () => {

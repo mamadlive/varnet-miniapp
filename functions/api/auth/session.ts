@@ -93,7 +93,6 @@ export async function onRequestGet(context: {
           role: row.role === 'admin' ? 'admin' : 'user',
           balance: Number(row.balance ?? 0),
           currency: row.currency || 'IRT',
-          verified: false,
           createdAt: row.created_at,
         },
       },

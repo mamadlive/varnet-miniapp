@@ -35,10 +35,6 @@ export interface User {
   role: UserRole
   balance: number
   currency: Currency
-  /** Phone-based KYC completed through Telegram's native contact dialog. */
-  verified: boolean
-  phoneNumber?: string
-  verifiedAt?: string
   createdAt: string
 }
 

@@ -17,7 +17,6 @@ import {
   Wallet,
 } from 'lucide-react'
 
-import { VerificationSheet } from '@/components/miniapp/VerificationSheet'
 import { Badge } from '@/components/ui/Badge'
 import { Button } from '@/components/ui/Button'
 import { Card } from '@/components/ui/Card'
@@ -130,7 +129,6 @@ export default function ProfilePage() {
 
   const [sheet, setSheet] = useState<ProfileSheet | null>(null)
   const [avatarFailed, setAvatarFailed] = useState(false)
-  const [verificationOpen, setVerificationOpen] = useState(false)
 
   useEffect(() => {
     void loadWallet()
@@ -139,16 +137,10 @@ export default function ProfilePage() {
   const fullName = [user?.firstName, user?.lastName].filter(Boolean).join(' ') || 'کاربر تلگرام'
   const username = user?.username
   const isPremium = telegramUser?.is_premium === true
-  const verified = user?.verified === true
 
   const openSheet = (next: ProfileSheet) => {
     haptic()
     setSheet(next)
-  }
-
-  const openVerification = () => {
-    haptic()
-    setVerificationOpen(true)
   }
 
   const sheetTitles: Record<ProfileSheet, { title: string; description?: string }> = {
@@ -195,17 +187,6 @@ export default function ProfilePage() {
                   {fa.roles.admin}
                 </Badge>
               ) : null}
-              <button
-                type="button"
-                onClick={openVerification}
-                className="rounded-md focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-500"
-                aria-label={verified ? 'مشاهده وضعیت احراز هویت' : 'شروع احراز هویت'}
-              >
-                <Badge tone={verified ? 'success' : 'warning'} size="sm">
-                  <ShieldCheck className="size-3" aria-hidden />
-                  {verified ? 'احراز هویت شده' : 'احراز هویت نشده'}
-                </Badge>
-              </button>
             </div>
           </div>
         </div>
@@ -244,12 +225,6 @@ export default function ProfilePage() {
       <div>
         <p className="tg-section-title">حساب</p>
         <Card variant="surface" padded={false} className="divide-y divide-tg-separator overflow-hidden">
-          <MenuRow
-            icon={ShieldCheck}
-            label="احراز هویت"
-            hint={verified ? 'تأیید شده' : 'نیاز به تأیید'}
-            onClick={openVerification}
-          />
           <MenuRow
             icon={ReceiptText}
             label="سفارش‌های من"
@@ -358,11 +333,6 @@ export default function ProfilePage() {
         {sheet === 'language' ? <LanguagePanel language={INTERFACE_LANGUAGE} /> : null}
         {sheet === 'about' ? <AboutPanel /> : null}
       </Sheet>
-
-      <VerificationSheet
-        open={verificationOpen}
-        onClose={() => setVerificationOpen(false)}
-      />
     </div>
   )
 }

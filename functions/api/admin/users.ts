@@ -92,7 +92,6 @@ export async function onRequestGet(context: PagesContext): Promise<Response> {
       role: row.id === selfId || row.role === 'admin' ? 'admin' : 'user',
       balance: Number(row.balance ?? 0),
       currency: row.currency ?? 'IRT',
-      verified: false,
       createdAt: row.created_at,
     })),
     meta: { count: rows.length, limit: USER_LIMIT },

@@ -803,7 +803,6 @@ export const mockUsers: User[] = [
     role: 'user',
     balance: 2_480_000,
     currency: 'IRT',
-    verified: false,
     createdAt: iso(180),
   },
   {
@@ -815,9 +814,6 @@ export const mockUsers: User[] = [
     role: 'user',
     balance: 362_500,
     currency: 'IRT',
-    verified: true,
-    phoneNumber: '+98 912 448 2210',
-    verifiedAt: iso(118),
     createdAt: iso(120),
   },
   {
@@ -829,7 +825,6 @@ export const mockUsers: User[] = [
     role: 'user',
     balance: 120_000,
     currency: 'IRT',
-    verified: false,
     createdAt: iso(96),
   },
   {
@@ -841,9 +836,6 @@ export const mockUsers: User[] = [
     role: 'user',
     balance: 4_021_000,
     currency: 'IRT',
-    verified: true,
-    phoneNumber: '+98 921 337 9084',
-    verifiedAt: iso(60),
     createdAt: iso(64),
   },
   {
@@ -855,9 +847,6 @@ export const mockUsers: User[] = [
     role: 'admin',
     balance: 0,
     currency: 'IRT',
-    verified: true,
-    phoneNumber: '+98 935 128 6600',
-    verifiedAt: iso(230),
     createdAt: iso(240),
   },
 ]
