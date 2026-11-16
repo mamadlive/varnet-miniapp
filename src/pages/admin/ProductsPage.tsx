@@ -79,6 +79,7 @@ export default function ProductsPage() {
   const usdtRateToman = useAdminStore((state) =>
     state.usdtRateToman > 0 ? state.usdtRateToman : state.serverUsdtRateToman,
   )
+  const marginTiers = useAdminStore((state) => state.marginTiers)
 
   const [marginProduct, setMarginProduct] = useState<AccountProduct | null>(null)
   const [marginType, setMarginType] = useState<DiscountType>('percent')
@@ -97,7 +98,7 @@ export default function ProductsPage() {
   const marginFor = (product: AccountProduct): ProfitMargin =>
     hasMargin(margins[product.id])
       ? margins[product.id]!
-      : autoMarginForUsd(usdPriceOf(product))
+      : autoMarginForUsd(usdPriceOf(product), marginTiers)
   const finalPriceOf = (product: AccountProduct): number =>
     applyProfitMargin(basePriceOf(product), marginFor(product))
 
@@ -175,12 +176,12 @@ export default function ProductsPage() {
   const marginPreviewBase = marginProduct ? basePriceOf(marginProduct) : 0
   const marginPreviewValue = Number(marginValue)
   const marginAutoPercent = marginProduct
-    ? autoMarginPercentForUsd(usdPriceOf(marginProduct))
+    ? autoMarginPercentForUsd(usdPriceOf(marginProduct), marginTiers)
     : 0
   const marginPreviewRule: ProfitMargin | undefined = marginProduct
     ? Number.isFinite(marginPreviewValue) && marginPreviewValue > 0
       ? { type: marginType, value: Math.round(marginPreviewValue) }
-      : autoMarginForUsd(usdPriceOf(marginProduct))
+      : autoMarginForUsd(usdPriceOf(marginProduct), marginTiers)
     : undefined
   const marginPreview = applyProfitMargin(marginPreviewBase, marginPreviewRule)
 
@@ -348,7 +349,7 @@ export default function ProductsPage() {
               </Badge>
             ) : (
               <Badge tone="brand" size="sm">
-                خودکار {formatCount(autoMarginPercentForUsd(usdPriceOf(product)))}٪
+                خودکار {formatCount(autoMarginPercentForUsd(usdPriceOf(product), marginTiers))}٪
               </Badge>
             )}
             <Button

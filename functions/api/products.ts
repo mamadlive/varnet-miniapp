@@ -221,6 +221,20 @@ export async function onRequestGet(context: PagesContext): Promise<Response> {
       // The rate is advisory; a missing meta table must not hide the catalogue.
     }
 
+    let marginTiers: Array<{ upToUsd: number | null; percent: number }> | undefined
+    try {
+      const tiersRow = await db
+        .prepare("SELECT value FROM settings WHERE key = 'margin_tiers'")
+        .bind()
+        .first<{ value: string }>()
+      const parsed: unknown = tiersRow?.value ? JSON.parse(tiersRow.value) : undefined
+      if (Array.isArray(parsed)) {
+        marginTiers = parsed as Array<{ upToUsd: number | null; percent: number }>
+      }
+    } catch {
+      // The ladder is advisory; clients fall back to the built-in tiers.
+    }
+
     const products = rows.map(toProduct)
 
     return jsonResponse({
@@ -230,6 +244,7 @@ export async function onRequestGet(context: PagesContext): Promise<Response> {
         count: products.length,
         fetchedAt: new Date().toISOString(),
         ...(usdtRate !== undefined ? { usdtRate } : {}),
+        ...(marginTiers ? { marginTiers } : {}),
       },
     })
   } catch (error) {

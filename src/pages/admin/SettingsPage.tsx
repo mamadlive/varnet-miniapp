@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import type { LucideIcon } from 'lucide-react'
 import {
   CheckCircle2,
@@ -8,6 +8,7 @@ import {
   EyeOff,
   KeyRound,
   LockKeyhole,
+  Percent,
   Save,
   Server,
   ShieldCheck,
@@ -28,7 +29,12 @@ import {
   maskSecret,
   normalizeCardNumber,
 } from '@/lib/format'
-import { AUTO_MARGIN_TIERS } from '@/lib/pricing'
+import type { AutoMarginTier } from '@/lib/pricing'
+import {
+  fetchMarginTiers,
+  isAdminDemoPreview,
+  saveMarginTiers,
+} from '@/services/admin.service'
 import { useAdminStore } from '@/store/adminStore'
 import type { ProviderKeyId } from '@/store/adminStore'
 
@@ -312,13 +318,158 @@ const MIN_USDT_RATE = 10_000
 const MAX_USDT_RATE = 5_000_000
 
 /** «کمتر از ۱ دلار»، «۱ تا ۲ دلار»، «۸ دلار و بیشتر». */
-function tierRangeLabel(index: number): string {
-  const entry = AUTO_MARGIN_TIERS[index]!
+function tierRangeLabel(tiers: AutoMarginTier[], index: number): string {
+  const entry = tiers[index]!
   if (entry.upToUsd === null) {
-    return `${formatCount(AUTO_MARGIN_TIERS[index - 1]!.upToUsd!)} دلار و بیشتر`
+    const previous = tiers[index - 1]?.upToUsd
+    return previous ? `${formatCount(previous)} دلار و بیشتر` : 'همه قیمت‌ها'
   }
   if (index === 0) return `کمتر از ${formatCount(entry.upToUsd)} دلار`
-  return `${formatCount(AUTO_MARGIN_TIERS[index - 1]!.upToUsd!)} تا ${formatCount(entry.upToUsd)} دلار`
+  return `${formatCount(tiers[index - 1]!.upToUsd!)} تا ${formatCount(entry.upToUsd)} دلار`
+}
+
+function toEnglishDigits(value: string): string {
+  return value.replace(/[۰-۹]/g, (digit) => String('۰۱۲۳۴۵۶۷۸۹'.indexOf(digit)))
+}
+
+/**
+ * Editable automatic margin ladder. Percentages persist in D1 `settings`
+ * (`margin_tiers`) and `/api/products` hands the same ladder to the Mini App.
+ */
+function MarginTiersCard() {
+  const marginTiers = useAdminStore((state) => state.marginTiers)
+  const setMarginTiers = useAdminStore((state) => state.setMarginTiers)
+
+  const [drafts, setDrafts] = useState<string[]>(() =>
+    marginTiers.map((tier) => String(tier.percent)),
+  )
+  const [loading, setLoading] = useState(() => !isAdminDemoPreview())
+  const [saving, setSaving] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const [saved, setSaved] = useState(false)
+
+  useEffect(() => {
+    if (isAdminDemoPreview()) return
+    let cancelled = false
+    fetchMarginTiers()
+      .then((tiers) => {
+        if (cancelled || !tiers) return
+        useAdminStore.getState().setMarginTiers(tiers)
+        setDrafts(tiers.map((tier) => String(tier.percent)))
+      })
+      .catch((err: unknown) => {
+        if (!cancelled) {
+          setError(err instanceof Error ? err.message : 'خواندن سود پلکانی از سرور انجام نشد.')
+        }
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false)
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [])
+
+  const handleSave = async () => {
+    const tiers: AutoMarginTier[] = []
+    for (let index = 0; index < marginTiers.length; index += 1) {
+      const raw = toEnglishDigits(drafts[index] ?? '').replace(/[,\u066C\s]/g, '')
+      const percent = Number(raw)
+      if (!Number.isFinite(percent) || percent < 0 || percent > 500) {
+        setError(`درصد ردیف «${tierRangeLabel(marginTiers, index)}» باید بین ۰ تا ۵۰۰ باشد.`)
+        return
+      }
+      tiers.push({ upToUsd: marginTiers[index]!.upToUsd, percent: Math.round(percent * 100) / 100 })
+    }
+
+    setSaving(true)
+    setError(null)
+    try {
+      if (isAdminDemoPreview()) {
+        setMarginTiers(tiers)
+      } else {
+        setMarginTiers(await saveMarginTiers(tiers))
+      }
+      setSaved(true)
+      window.setTimeout(() => setSaved(false), 3200)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'ذخیره سود پلکانی انجام نشد.')
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  const dirty = drafts.some(
+    (draft, index) =>
+      Number(toEnglishDigits(draft).replace(/[,\u066C\s]/g, '')) !== marginTiers[index]?.percent,
+  )
+
+  return (
+    <Card className="space-y-3">
+      <div className="flex items-start gap-3">
+        <span className="flex size-10 shrink-0 items-center justify-center rounded-xl bg-brand-500/10 text-brand-600">
+          <Percent className="size-5" aria-hidden />
+        </span>
+        <div className="min-w-0 flex-1">
+          <div className="flex flex-wrap items-center gap-2">
+            <h2 className="text-[14.5px] font-semibold text-tg-text">سود پلکانی خودکار</h2>
+            <Badge tone="brand" size="sm">
+              {formatCount(marginTiers.length)} پله
+            </Badge>
+            {loading ? <span className="text-[11px] text-tg-hint">در حال خواندن از سرور…</span> : null}
+            {saved ? (
+              <span className="inline-flex items-center gap-1 text-[11px] font-medium text-emerald-600">
+                <CheckCircle2 className="size-3.5" aria-hidden />
+                ذخیره شد
+              </span>
+            ) : null}
+          </div>
+          <p className="mt-1 text-[12px] leading-relaxed text-tg-hint">
+            درصد هر پله بر اساس قیمت پایه تتر اعمال می‌شود. مقادیر در پایگاه داده ذخیره می‌شوند و
+            مینی‌اپ نیز از همین اعداد قیمت‌گذاری می‌کند.
+          </p>
+        </div>
+      </div>
+
+      <ul className="divide-y divide-tg-separator overflow-hidden rounded-xl border border-tg-separator">
+        {marginTiers.map((tier, index) => (
+          <li
+            key={`${tier.upToUsd ?? 'max'}-${index}`}
+            className="flex items-center justify-between gap-3 px-3 py-2"
+          >
+            <span className="text-[12px] text-tg-hint">{tierRangeLabel(marginTiers, index)}</span>
+            <div className="flex w-24 items-center gap-1.5">
+              <Input
+                inputMode="numeric"
+                value={drafts[index] ?? ''}
+                onChange={(event) => {
+                  const next = [...drafts]
+                  next[index] = event.target.value
+                  setDrafts(next)
+                  setError(null)
+                }}
+                aria-label={`درصد سود ${tierRangeLabel(marginTiers, index)}`}
+                className="h-8 text-center text-[12.5px] tabular-nums"
+                autoComplete="off"
+              />
+              <span className="text-[12px] text-tg-hint">٪</span>
+            </div>
+          </li>
+        ))}
+      </ul>
+
+      {error ? <p className="text-[11.5px] text-tg-destructive">{error}</p> : null}
+
+      <div className="flex items-center justify-between gap-2">
+        <p className="text-[11.5px] leading-relaxed text-tg-hint/80">
+          حاشیه سود دستی هر محصول در صفحه «محصولات» اولویت دارد.
+        </p>
+        <Button onClick={handleSave} loading={saving} disabled={!dirty} leftIcon={<Save className="size-4" />}>
+          ذخیره درصدها
+        </Button>
+      </div>
+    </Card>
+  )
 }
 
 /**
@@ -439,29 +590,6 @@ function UsdtRateCard() {
           </span>
         </div>
       </div>
-
-      <div>
-        <p className="mb-1.5 text-[12px] font-medium text-tg-hint">
-          سود پلکانی خودکار (بر اساس قیمت پایه تتر)
-        </p>
-        <ul className="divide-y divide-tg-separator overflow-hidden rounded-xl border border-tg-separator text-[12px]">
-          {AUTO_MARGIN_TIERS.map((tier, index) => (
-            <li
-              key={tier.percent}
-              className="flex items-center justify-between px-3 py-1.5"
-            >
-              <span className="text-tg-hint">{tierRangeLabel(index)}</span>
-              <span className="font-semibold tabular-nums text-tg-text">
-                {formatCount(tier.percent)}٪
-              </span>
-            </li>
-          ))}
-        </ul>
-        <p className="mt-1.5 text-[11.5px] leading-relaxed text-tg-hint/80">
-          این درصدها به‌صورت خودکار روی همه محصولات اعمال می‌شوند؛ حاشیه سود دستی هر محصول در
-          صفحه «محصولات» اولویت دارد.
-        </p>
-      </div>
     </Card>
   )
 }
@@ -509,6 +637,8 @@ export default function SettingsPage() {
       <BankTransferCard />
 
       <UsdtRateCard />
+
+      <MarginTiersCard />
 
       <div className="grid gap-4 xl:grid-cols-2">
         {PROVIDERS.map((provider) => (

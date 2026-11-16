@@ -1,6 +1,7 @@
 import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
 import type { ProfitMargin } from '@/lib/pricing'
+import { AUTO_MARGIN_TIERS, type AutoMarginTier } from '@/lib/pricing'
 import {
   mockAccountProducts,
   mockBankDetails,
@@ -49,6 +50,8 @@ interface AdminState {
   products: AccountProduct[]
   /** Provider base price → customer price markups, keyed by product id. */
   margins: Record<string, ProfitMargin>
+  /** Automatic ladder loaded from D1 `settings`; edits are saved server-side. */
+  marginTiers: AutoMarginTier[]
   /** Admin USDT→Toman rate; `0` keeps the server-side `USDT_RATE_TOMAN`. */
   usdtRateToman: number
   /** Rate last reported by the proxy, used when no admin override is set. */
@@ -74,6 +77,8 @@ interface AdminState {
   removeCoupon: (id: string) => void
   setProducts: (products: AccountProduct[]) => void
   setMargin: (productId: string, margin: ProfitMargin | null) => void
+  /** Replaces the automatic ladder (already persisted via the admin API). */
+  setMarginTiers: (tiers: AutoMarginTier[]) => void
   /** `0` clears the override so the server-side `USDT_RATE_TOMAN` is used again. */
   setUsdtRateToman: (rate: number) => void
   setServerUsdtRateToman: (rate: number) => void
@@ -125,6 +130,7 @@ export const useAdminStore = create<AdminState>()(
       coupons: mockCoupons,
       products: mockAccountProducts,
       margins: mockProfitMargins,
+      marginTiers: AUTO_MARGIN_TIERS,
       usdtRateToman: 0,
       serverUsdtRateToman: DEFAULT_SERVER_USDT_RATE_TOMAN,
       productNotes: {},
@@ -174,6 +180,11 @@ export const useAdminStore = create<AdminState>()(
           else delete margins[productId]
           return { margins }
         })
+      },
+
+      setMarginTiers: (tiers) => {
+        if (tiers.length === 0) return
+        set({ marginTiers: tiers })
       },
 
       setUsdtRateToman: (rate) => {
@@ -312,6 +323,7 @@ export const useAdminStore = create<AdminState>()(
         coupons: state.coupons,
         products: state.products,
         margins: state.margins,
+        marginTiers: state.marginTiers,
         usdtRateToman: state.usdtRateToman,
         serverUsdtRateToman: state.serverUsdtRateToman,
         productNotes: state.productNotes,

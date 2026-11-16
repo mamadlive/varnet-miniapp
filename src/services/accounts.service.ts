@@ -34,6 +34,8 @@ export interface ProviderCatalogEnvelope {
     count?: number
     /** USDT→Toman rate used by the last sync (stored in D1 `sync_meta`). */
     usdtRate?: number
+    /** Automatic margin ladder stored in D1 `settings` (`margin_tiers`). */
+    marginTiers?: Array<{ upToUsd: number | null; percent: number }>
     fetchedAt?: string
   }
 }
@@ -106,8 +108,9 @@ function usdPriceOf(product: AccountProduct, baseToman: number, rate: number): n
  * the automatic USDT tier ladder applies.
  */
 function marginForProduct(product: AccountProduct, usdPrice: number): ProfitMargin {
-  const override = useAdminStore.getState().margins[product.id]
-  return hasMargin(override) ? override : autoMarginForUsd(usdPrice)
+  const { margins, marginTiers } = useAdminStore.getState()
+  const override = margins[product.id]
+  return hasMargin(override) ? override : autoMarginForUsd(usdPrice, marginTiers)
 }
 
 /** Localizes, reprices and decorates a product for display. */
@@ -195,6 +198,9 @@ async function fetchCatalogueFromServer(): Promise<AccountProduct[]> {
 
   if (payload.meta?.usdtRate) {
     useAdminStore.getState().setServerUsdtRateToman(payload.meta.usdtRate)
+  }
+  if (Array.isArray(payload.meta?.marginTiers) && payload.meta.marginTiers.length > 0) {
+    useAdminStore.getState().setMarginTiers(payload.meta.marginTiers)
   }
 
   return payload.data

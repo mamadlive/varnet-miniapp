@@ -52,17 +52,25 @@ export const AUTO_MARGIN_TIERS: AutoMarginTier[] = [
   { upToUsd: null, percent: 15 },
 ]
 
-/** Margin percent for a USDT price; non-positive input falls into the top tier. */
-export function autoMarginPercentForUsd(usdPrice: number): number {
+/**
+ * Margin percent for a USDT price; non-positive input falls into the top tier.
+ * `tiers` is the admin-configured ladder loaded from D1 (`margin_tiers`).
+ */
+export function autoMarginPercentForUsd(
+  usdPrice: number,
+  tiers: AutoMarginTier[] = AUTO_MARGIN_TIERS,
+): number {
+  const ladder = tiers.length > 0 ? tiers : AUTO_MARGIN_TIERS
   const price = Number.isFinite(usdPrice) && usdPrice > 0 ? usdPrice : 0
-  const tier = AUTO_MARGIN_TIERS.find(
-    (entry) => entry.upToUsd === null || price < entry.upToUsd,
-  )
-  return tier?.percent ?? AUTO_MARGIN_TIERS[AUTO_MARGIN_TIERS.length - 1]!.percent
+  const tier = ladder.find((entry) => entry.upToUsd === null || price < entry.upToUsd)
+  return tier?.percent ?? ladder[ladder.length - 1]!.percent
 }
 
-export function autoMarginForUsd(usdPrice: number): ProfitMargin {
-  return { type: 'percent', value: autoMarginPercentForUsd(usdPrice) }
+export function autoMarginForUsd(
+  usdPrice: number,
+  tiers: AutoMarginTier[] = AUTO_MARGIN_TIERS,
+): ProfitMargin {
+  return { type: 'percent', value: autoMarginPercentForUsd(usdPrice, tiers) }
 }
 
 export function isCouponExpired(coupon: Coupon): boolean {

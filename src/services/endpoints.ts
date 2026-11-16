@@ -16,6 +16,14 @@ export const endpoints = {
     catalogue: '/api/products',
   },
 
+  admin: {
+    users: '/api/admin/users',
+    /** Manual wallet top-up / deduction (admin only). */
+    walletAdjust: '/api/admin/wallet/adjust',
+    /** Read/save the automatic margin ladder (admin only). */
+    margins: '/api/admin/settings/margins',
+  },
+
   vpn: {
     root: '/',
     health: '/health',
