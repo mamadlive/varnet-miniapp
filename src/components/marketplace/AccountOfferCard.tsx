@@ -59,9 +59,9 @@ export function AccountOfferCard({
         <span aria-hidden className="absolute -left-4 -top-6 size-20 rounded-full bg-white/20 blur-xl" />
         <span aria-hidden className="absolute -bottom-8 -right-3 size-24 rounded-full bg-black/15 blur-xl" />
 
-        <span className="relative flex size-11 items-center justify-center rounded-2xl bg-white/18 ring-1 ring-white/30 backdrop-blur-sm">
+        <span className="relative flex size-10 shrink-0 items-center justify-center rounded-full border border-white/30 bg-tg-secondary-bg/50 shadow-sm ring-1 ring-white/20 backdrop-blur-md">
           {product.emoji ? (
-            <span aria-hidden className="select-none text-[24px] leading-none drop-shadow">
+            <span aria-hidden className="select-none text-[22px] leading-none drop-shadow">
               {product.emoji}
             </span>
           ) : (

@@ -199,7 +199,7 @@ export function PurchaseConfirmSheet({
         {target ? (
           <div className="space-y-3">
             <div className="flex items-center gap-3 rounded-2xl border border-tg-separator bg-tg-secondary-bg/60 p-3">
-              <span className="flex size-12 shrink-0 items-center justify-center rounded-2xl bg-gradient-to-br from-brand-500 to-brand-700 text-[22px] leading-none text-white shadow-sm shadow-brand-500/25">
+              <span className="flex size-12 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-brand-500 to-brand-700 text-[22px] leading-none text-white shadow-sm shadow-brand-500/25 ring-1 ring-white/25">
                 {emoji ? (
                   <span aria-hidden>{emoji}</span>
                 ) : Icon ? (

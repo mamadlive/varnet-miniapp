@@ -81,8 +81,10 @@ export function ProductQuickView({ product, onClose, onPurchase }: ProductQuickV
         >
           <span aria-hidden className="absolute -left-6 -top-8 size-32 rounded-full bg-white/15 blur-2xl" />
           <span aria-hidden className="absolute -bottom-10 -right-6 size-32 rounded-full bg-black/10 blur-2xl" />
-          <span aria-hidden className="select-none text-[56px] leading-none drop-shadow">
-            {product.emoji ?? '📦'}
+          <span className="relative flex size-24 items-center justify-center rounded-full border border-white/30 bg-tg-secondary-bg/50 shadow-md ring-1 ring-white/20 backdrop-blur-md">
+            <span aria-hidden className="select-none text-[44px] leading-none drop-shadow">
+              {product.emoji ?? '📦'}
+            </span>
           </span>
           {product.badge ? (
             <Badge
