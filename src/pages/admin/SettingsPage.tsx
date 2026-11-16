@@ -30,11 +30,7 @@ import {
   normalizeCardNumber,
 } from '@/lib/format'
 import type { AutoMarginTier } from '@/lib/pricing'
-import {
-  fetchMarginTiers,
-  isAdminDemoPreview,
-  saveMarginTiers,
-} from '@/services/admin.service'
+import { fetchMarginTiers, saveMarginTiers } from '@/services/admin.service'
 import { useAdminStore } from '@/store/adminStore'
 import type { ProviderKeyId } from '@/store/adminStore'
 
@@ -343,17 +339,16 @@ function MarginTiersCard() {
   const [drafts, setDrafts] = useState<string[]>(() =>
     marginTiers.map((tier) => String(tier.percent)),
   )
-  const [loading, setLoading] = useState(() => !isAdminDemoPreview())
+  const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [saved, setSaved] = useState(false)
 
   useEffect(() => {
-    if (isAdminDemoPreview()) return
     let cancelled = false
     fetchMarginTiers()
       .then((tiers) => {
-        if (cancelled || !tiers) return
+        if (cancelled) return
         useAdminStore.getState().setMarginTiers(tiers)
         setDrafts(tiers.map((tier) => String(tier.percent)))
       })
@@ -385,11 +380,7 @@ function MarginTiersCard() {
     setSaving(true)
     setError(null)
     try {
-      if (isAdminDemoPreview()) {
-        setMarginTiers(tiers)
-      } else {
-        setMarginTiers(await saveMarginTiers(tiers))
-      }
+      setMarginTiers(await saveMarginTiers(tiers))
       setSaved(true)
       window.setTimeout(() => setSaved(false), 3200)
     } catch (err) {

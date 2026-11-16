@@ -1,7 +1,8 @@
-import { Bell, ChevronDown, Menu, Moon, Search, Sun } from 'lucide-react'
-import { useLocation } from 'react-router-dom'
+import { Bell, ChevronDown, LogOut, Menu, Moon, Search, Sun } from 'lucide-react'
+import { useLocation, useNavigate } from 'react-router-dom'
 import { UserAvatar } from '@/components/admin/UserAvatar'
 import { Input } from '@/components/ui/Input'
+import { useAdminAuthStore } from '@/store/adminAuthStore'
 import { useAuthStore } from '@/store/authStore'
 import { useThemeStore } from '@/store/themeStore'
 
@@ -31,13 +32,21 @@ export interface AdminTopbarProps {
 /** Sticky desktop header: section context, global search, notifications, account. */
 export function AdminTopbar({ onOpenMobileNav }: AdminTopbarProps) {
   const user = useAuthStore((state) => state.user)
+  const admin = useAdminAuthStore((state) => state.admin)
+  const logout = useAdminAuthStore((state) => state.logout)
   const theme = useThemeStore((state) => state.theme)
   const toggleTheme = useThemeStore((state) => state.toggleAdminTheme)
   const { pathname } = useLocation()
+  const navigate = useNavigate()
   const sectionTitle = resolveSectionTitle(pathname)
-  const displayName = user ? `${user.firstName} ${user.lastName ?? ''}`.trim() : 'مدیر ورنت'
-  const firstName = user?.firstName ?? 'مدیر'
+  const displayName = admin
+    ? `${admin.firstName} ${admin.lastName ?? ''}`.trim()
+    : user
+      ? `${user.firstName} ${user.lastName ?? ''}`.trim()
+      : 'مدیر ورنت'
+  const firstName = admin?.firstName ?? user?.firstName ?? 'مدیر'
   const isDark = theme === 'dark'
+  const isOtpSession = admin !== null
 
   return (
     <header className="sticky top-0 z-30 border-b border-tg-separator bg-tg-bg/85 backdrop-blur-md">
@@ -90,18 +99,28 @@ export function AdminTopbar({ onOpenMobileNav }: AdminTopbarProps) {
           <span className="absolute end-2.5 top-2.5 size-1.5 rounded-full bg-rose-500 ring-2 ring-tg-bg" />
         </button>
 
-        <button
-          type="button"
-          aria-label="منوی حساب (به‌زودی)"
-          title="منوی حساب (به‌زودی)"
-          className="flex shrink-0 items-center gap-2 rounded-xl border border-tg-separator bg-tg-bg p-1 pe-2 transition-colors hover:bg-tg-secondary-bg"
-        >
+        <div className="flex shrink-0 items-center gap-2 rounded-xl border border-tg-separator bg-tg-bg p-1 pe-2">
           <UserAvatar name={displayName} photoUrl={user?.photoUrl} size="sm" />
           <span className="hidden max-w-24 truncate text-[12.5px] font-medium text-tg-text sm:block">
             {firstName}
           </span>
           <ChevronDown className="hidden size-3.5 text-tg-hint sm:block" aria-hidden />
-        </button>
+        </div>
+
+        {isOtpSession ? (
+          <button
+            type="button"
+            onClick={() => {
+              logout()
+              navigate('/admin/login', { replace: true })
+            }}
+            aria-label="خروج از پنل مدیریت"
+            title="خروج از پنل مدیریت"
+            className="flex size-10 shrink-0 items-center justify-center rounded-xl border border-tg-separator bg-tg-bg text-tg-hint transition-colors hover:bg-rose-500/10 hover:text-rose-500"
+          >
+            <LogOut className="size-[18px]" aria-hidden />
+          </button>
+        ) : null}
       </div>
     </header>
   )

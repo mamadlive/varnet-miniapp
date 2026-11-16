@@ -119,13 +119,18 @@ export async function verifyInitData(
   }
 }
 
+/** Canonical form for Telegram ids compared against `ADMIN_TELEGRAM_IDS`. */
+export function telegramIdKey(id: string | number): string {
+  return String(id).trim()
+}
+
 /** Parse the comma/space separated `ADMIN_TELEGRAM_IDS` allow-list. */
-export function configuredAdminIds(env: { ADMIN_TELEGRAM_IDS?: string }): Set<number> {
+export function configuredAdminIds(env: { ADMIN_TELEGRAM_IDS?: string }): Set<string> {
   return new Set(
     (env.ADMIN_TELEGRAM_IDS ?? '')
       .split(/[\s,]+/)
-      .map((value) => Number(value))
-      .filter((value) => Number.isInteger(value) && value > 0),
+      .map((value) => telegramIdKey(value))
+      .filter((value) => /^\d+$/.test(value) && Number(value) > 0),
   )
 }
 
@@ -179,6 +184,72 @@ export async function verifySessionToken(
       sub?: unknown
       exp?: unknown
     }
+    const telegramId = Number(parsed.sub)
+    const expiresAt = Number(parsed.exp)
+    if (!Number.isInteger(telegramId) || telegramId <= 0) return null
+    if (!Number.isFinite(expiresAt) || expiresAt <= Date.now() / 1000) return null
+    return telegramId
+  } catch {
+    return null
+  }
+}
+
+/* -------------------------------------------------------------------------- */
+/* Admin web session (Telegram OTP login)                                     */
+/* -------------------------------------------------------------------------- */
+
+const ADMIN_SESSION_VERSION = 'a1'
+export const ADMIN_SESSION_TTL_SECONDS = 12 * 60 * 60
+
+async function adminSessionKey(botToken: string): Promise<ArrayBuffer> {
+  return hmacSha256(new TextEncoder().encode('varnet-admin-session-v1'), botToken)
+}
+
+/** Issue a signed session for the desktop admin panel. */
+export async function createAdminSessionToken(
+  telegramId: number,
+  botToken: string,
+  ttlSeconds = ADMIN_SESSION_TTL_SECONDS,
+): Promise<SessionToken> {
+  const issuedAt = Math.floor(Date.now() / 1000)
+  const expiresAt = issuedAt + ttlSeconds
+  const payload = base64UrlEncode(
+    new TextEncoder().encode(
+      JSON.stringify({ sub: telegramId, scope: 'admin', iat: issuedAt, exp: expiresAt }),
+    ),
+  )
+  const signature = base64UrlEncode(
+    new Uint8Array(await hmacSha256(await adminSessionKey(botToken), payload)),
+  )
+  return {
+    token: `${ADMIN_SESSION_VERSION}.${payload}.${signature}`,
+    expiresAt: new Date(expiresAt * 1000).toISOString(),
+  }
+}
+
+/** Return the Telegram id from a valid admin session token, or `null`. */
+export async function verifyAdminSessionToken(
+  token: string,
+  botToken: string,
+): Promise<number | null> {
+  const [version, payload, signature, extra] = token.split('.')
+  if (version !== ADMIN_SESSION_VERSION || !payload || !signature || extra) return null
+
+  const payloadBytes = base64UrlDecode(payload)
+  if (!payloadBytes) return null
+
+  const expected = base64UrlEncode(
+    new Uint8Array(await hmacSha256(await adminSessionKey(botToken), payload)),
+  )
+  if (!timingSafeEqual(expected, signature)) return null
+
+  try {
+    const parsed = JSON.parse(new TextDecoder().decode(payloadBytes)) as {
+      sub?: unknown
+      scope?: unknown
+      exp?: unknown
+    }
+    if (parsed.scope !== 'admin') return null
     const telegramId = Number(parsed.sub)
     const expiresAt = Number(parsed.exp)
     if (!Number.isInteger(telegramId) || telegramId <= 0) return null

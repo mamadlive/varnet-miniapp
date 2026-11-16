@@ -238,19 +238,26 @@ export default function ProfilePage() {
       {isAdmin ? (
         <div>
           <p className="tg-section-title">مدیریت</p>
-          <Card
-            variant="surface"
-            padded={false}
-            className="divide-y divide-tg-separator overflow-hidden"
-          >
-            <MenuRow
-              icon={LayoutDashboard}
-              label="پنل مدیریت"
-              hint="دسترسی مدیر"
-              to="/admin"
-              onClick={() => haptic()}
-            />
-          </Card>
+          <Link to="/admin" onClick={() => haptic()} className="block">
+            <div className="relative overflow-hidden rounded-2xl bg-gradient-to-br from-brand-500 to-brand-700 p-4 text-white shadow-md shadow-brand-500/25 transition-transform active:scale-[0.99]">
+              <div
+                aria-hidden
+                className="pointer-events-none absolute -end-8 -top-10 size-28 rounded-full bg-white/15 blur-xl"
+              />
+              <div className="relative flex items-center gap-3">
+                <span className="flex size-11 shrink-0 items-center justify-center rounded-xl bg-white/20">
+                  <LayoutDashboard className="size-5" aria-hidden />
+                </span>
+                <div className="min-w-0 flex-1">
+                  <p className="text-[15px] font-bold">ورود به پنل مدیریت</p>
+                  <p className="mt-0.5 text-[11.5px] leading-relaxed text-white/80">
+                    مدیریت کاربران، شارژ کیف پول و تنظیم سود پلکانی
+                  </p>
+                </div>
+                <ChevronLeft className="size-5 shrink-0 text-white/80" aria-hidden />
+              </div>
+            </div>
+          </Link>
         </div>
       ) : null}
 

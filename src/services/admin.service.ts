@@ -1,7 +1,7 @@
-import { env } from '@/config/env'
 import { sleep } from '@/lib/utils'
 import type { AutoMarginTier } from '@/lib/pricing'
 import { ApiError, apiGetProxy, apiPostProxy } from '@/services/apiClient'
+import { getAdminSessionToken } from '@/services/adminAuth.service'
 import { endpoints } from '@/services/endpoints'
 import {
   mockAdminStats,
@@ -16,10 +16,10 @@ import type { AdminStats, Order, RevenuePoint, User, VpnServer } from '@/types'
  * Admin panel data.
  *
  * Users, wallet adjustments and margin tiers come from `/api/admin/*` Pages
- * Functions, authorized by the caller's Telegram `initData` plus an admin
- * allow-list. The user list is always D1-backed — never fixtures — so every
- * row id is a valid wallet-adjustment target. Dashboards, orders and servers
- * still render local fixtures.
+ * Functions, authorized by either the OTP admin token (`Authorization:
+ * Bearer`) or a Mini App admin's Telegram `initData`. The user list is always
+ * D1-backed — never fixtures — so every row id is a valid wallet-adjustment
+ * target. Dashboards, orders and servers still render local fixtures.
  */
 
 interface AdminEnvelope<T> {
@@ -29,13 +29,15 @@ interface AdminEnvelope<T> {
   code?: string
 }
 
-export function isAdminDemoPreview(): boolean {
-  return env.demoMode && !getTelegramInitData()
-}
-
 function adminHeaders(): Record<string, string> | undefined {
+  const headers: Record<string, string> = {}
   const initData = getTelegramInitData()
-  return initData ? { 'X-Telegram-Init-Data': initData } : undefined
+  if (initData) headers['X-Telegram-Init-Data'] = initData
+
+  const adminToken = getAdminSessionToken()
+  if (adminToken) headers.Authorization = `Bearer ${adminToken}`
+
+  return Object.keys(headers).length > 0 ? headers : undefined
 }
 
 function adminFailure(payload: AdminEnvelope<unknown> | null | undefined, fallback: string): ApiError {
@@ -98,9 +100,7 @@ export async function adjustUserWallet(
   return payload.data
 }
 
-/** `null` means the desktop demo preview has no server session. */
-export async function fetchMarginTiers(): Promise<AutoMarginTier[] | null> {
-  if (isAdminDemoPreview()) return null
+export async function fetchMarginTiers(): Promise<AutoMarginTier[]> {
   const data = await adminGet<{ tiers: AutoMarginTier[] }>(endpoints.admin.margins)
   if (!Array.isArray(data.tiers)) throw new ApiError('پاسخ پلکان سود نامعتبر بود.')
   return data.tiers

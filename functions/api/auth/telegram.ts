@@ -10,6 +10,7 @@
 import {
   createSessionToken,
   configuredAdminIds,
+  telegramIdKey,
   verifyInitData,
 } from '../_lib/telegram'
 import {
@@ -99,7 +100,11 @@ export async function onRequestPost(context: {
   const now = new Date().toISOString()
 
   try {
-    const role = await loadRole(db, userId, configuredAdminIds(env).has(telegramUser.id))
+    const role = await loadRole(
+      db,
+      userId,
+      configuredAdminIds(env).has(telegramIdKey(telegramUser.id)),
+    )
 
     await db
       .prepare(

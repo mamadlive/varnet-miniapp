@@ -10,6 +10,8 @@
 
 import {
   configuredAdminIds,
+  telegramIdKey,
+  verifyAdminSessionToken,
   verifyInitData,
   type TelegramMiniAppUser,
 } from '../_lib/telegram'
@@ -40,8 +42,6 @@ export interface AdminEnv {
   TELEGRAM_BOT_TOKEN?: string
   /** Comma/space separated Telegram ids allowed to call admin routes. */
   ADMIN_TELEGRAM_IDS?: string
-  /** Local-only auth switch (same switch as `PURCHASE_DEMO_TELEGRAM_ID`). */
-  PURCHASE_DEMO_TELEGRAM_ID?: string
 }
 
 export interface PagesContext {
@@ -99,9 +99,55 @@ async function hasAdminRole(db: D1Database, telegramId: number): Promise<boolean
   }
 }
 
+/** `ADMIN_TELEGRAM_IDS` is authoritative; D1 `users.role` is the fallback. */
+export async function isAdminAllowed(
+  db: D1Database,
+  env: AdminEnv,
+  telegramId: number,
+): Promise<boolean> {
+  return (
+    configuredAdminIds(env).has(telegramIdKey(telegramId)) ||
+    (await hasAdminRole(db, telegramId))
+  )
+}
+
+function bearerToken(request: Request): string {
+  const header = request.headers.get('Authorization') ?? ''
+  return /^Bearer\s+(.+)$/i.exec(header.trim())?.[1]?.trim() ?? ''
+}
+
+/** Load the display profile for a web admin session (never throws). */
+export async function loadTelegramProfile(
+  db: D1Database,
+  telegramId: number,
+): Promise<TelegramMiniAppUser> {
+  try {
+    const row = await db
+      .prepare(
+        'SELECT username, first_name, last_name FROM users WHERE telegram_id = ?',
+      )
+      .bind(telegramId)
+      .first<{ username: string | null; first_name: string | null; last_name: string | null }>()
+    return {
+      id: telegramId,
+      username: row?.username ?? undefined,
+      first_name: row?.first_name ?? 'مدیر',
+      last_name: row?.last_name ?? undefined,
+    }
+  } catch {
+    return { id: telegramId, first_name: 'مدیر' }
+  }
+}
+
 /**
- * Verify the caller is an admin. `ADMIN_TELEGRAM_IDS` is authoritative; D1
- * `users.role` is the fallback once ops flips that column.
+ * Verify the caller is an admin.
+ *
+ * Two credentials are accepted:
+ * - `Authorization: Bearer <admin session token>` from the Telegram-OTP web login,
+ * - `X-Telegram-Init-Data` from the Mini App.
+ *
+ * Either way the Telegram id must still be in `ADMIN_TELEGRAM_IDS` or carry
+ * `users.role = 'admin'` in D1. There is deliberately no demo bypass.
  */
 export async function authenticateAdmin(
   request: Request,
@@ -116,11 +162,11 @@ export async function authenticateAdmin(
     }
   }
 
+  const botToken = env.TELEGRAM_BOT_TOKEN?.trim()
   let user: TelegramMiniAppUser | null = null
-  const initData = request.headers.get('X-Telegram-Init-Data')?.trim()
+  const token = bearerToken(request)
 
-  if (initData) {
-    const botToken = env.TELEGRAM_BOT_TOKEN?.trim()
+  if (token) {
     if (!botToken) {
       return {
         ok: false,
@@ -129,33 +175,49 @@ export async function authenticateAdmin(
         message: 'توکن ربات در تنظیمات سرور موجود نیست.',
       }
     }
-    user = await verifyInitData(initData, botToken)
-    if (!user) {
+    const telegramId = await verifyAdminSessionToken(token, botToken)
+    if (telegramId === null) {
       return {
         ok: false,
         status: 401,
-        code: 'TELEGRAM_AUTH_INVALID',
-        message: 'نشست تلگرام معتبر نیست. مینی‌اپ را دوباره باز کنید.',
+        code: 'ADMIN_SESSION_INVALID',
+        message: 'نشست مدیریتی معتبر نیست یا منقضی شده است. دوباره وارد شوید.',
       }
     }
-  }
-
-  const demoId = Number(env.PURCHASE_DEMO_TELEGRAM_ID)
-  if (!user && Number.isInteger(demoId) && demoId > 0) {
-    user = { id: demoId, first_name: 'کاربر آزمایشی' }
+    user = await loadTelegramProfile(env.DB, telegramId)
+  } else {
+    const initData = request.headers.get('X-Telegram-Init-Data')?.trim()
+    if (initData) {
+      if (!botToken) {
+        return {
+          ok: false,
+          status: 500,
+          code: 'SERVER_NOT_CONFIGURED',
+          message: 'توکن ربات در تنظیمات سرور موجود نیست.',
+        }
+      }
+      user = await verifyInitData(initData, botToken)
+      if (!user) {
+        return {
+          ok: false,
+          status: 401,
+          code: 'TELEGRAM_AUTH_INVALID',
+          message: 'نشست تلگرام معتبر نیست. مینی‌اپ را دوباره باز کنید.',
+        }
+      }
+    }
   }
 
   if (!user) {
     return {
       ok: false,
       status: 401,
-      code: 'TELEGRAM_AUTH_REQUIRED',
-      message: 'برای عملیات مدیریتی باید مینی‌اپ را از داخل تلگرام باز کنید.',
+      code: 'ADMIN_AUTH_REQUIRED',
+      message: 'برای عملیات مدیریتی با کد تایید تلگرام وارد شوید یا مینی‌اپ را از تلگرام باز کنید.',
     }
   }
 
-  const allowed =
-    configuredAdminIds(env).has(user.id) || (await hasAdminRole(env.DB, user.id))
+  const allowed = await isAdminAllowed(env.DB, env, user.id)
   if (!allowed) {
     return {
       ok: false,

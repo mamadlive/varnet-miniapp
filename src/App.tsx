@@ -27,6 +27,7 @@ import { AdminGuard } from '@/routes/AdminGuard'
  *                       and icons are never downloaded by Mini App users
  *  *                 -> 404
  */
+const AdminLoginPage = lazy(() => import('@/pages/admin/LoginPage'))
 const AdminLayout = lazy(() => import('@/layouts/AdminLayout'))
 const DashboardPage = lazy(() => import('@/pages/admin/DashboardPage'))
 const UsersPage = lazy(() => import('@/pages/admin/UsersPage'))
@@ -51,13 +52,19 @@ export default function App() {
     <AppErrorBoundary>
       <BrowserRouter>
         <ScrollToTop />
-        <AuthGate>
-          <Suspense fallback={<RouteFallback />}>
-            <Routes>
+        <Suspense fallback={<RouteFallback />}>
+          <Routes>
             {/* ---------------------------------------------------------- */}
             {/* Telegram Mini App (customer facing, mobile first)           */}
             {/* ---------------------------------------------------------- */}
-            <Route path="/app" element={<MiniAppLayout />}>
+            <Route
+              path="/app"
+              element={
+                <AuthGate>
+                  <MiniAppLayout />
+                </AuthGate>
+              }
+            >
               <Route index element={<HomePage />} />
               <Route path="marketplace" element={<MarketplacePage />} />
               <Route path="vpn" element={<VpnPage />} />
@@ -72,6 +79,7 @@ export default function App() {
             {/* ---------------------------------------------------------- */}
             {/* Web admin panel (desktop first, lazy-loaded)                */}
             {/* ---------------------------------------------------------- */}
+            <Route path="/admin/login" element={<AdminLoginPage />} />
             <Route
               path="/admin"
               element={
@@ -96,8 +104,7 @@ export default function App() {
             <Route path="/" element={<Navigate to="/app" replace />} />
             <Route path="*" element={<NotFoundPage />} />
           </Routes>
-          </Suspense>
-        </AuthGate>
+        </Suspense>
       </BrowserRouter>
     </AppErrorBoundary>
   )
