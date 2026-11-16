@@ -2,6 +2,7 @@ import { useId, useState } from 'react'
 import { Link } from 'react-router-dom'
 import type { LucideIcon } from 'lucide-react'
 import { AlertTriangle, ShieldAlert, ShieldCheck, TicketPercent, Wallet, X } from 'lucide-react'
+import { BrandLogo } from '@/components/marketplace/BrandLogo'
 import { VerificationSheet } from '@/components/miniapp/VerificationSheet'
 import { Button } from '@/components/ui/Button'
 import { Input } from '@/components/ui/Input'
@@ -16,8 +17,11 @@ import type { CouponValidation } from '@/services/coupons.service'
 import { purchaseProduct } from '@/services/purchase.service'
 import { useAuthStore } from '@/store/authStore'
 import { useWalletStore } from '@/store/walletStore'
-import type { Currency, OrderKind } from '@/types'
+import type { AccountProduct, Currency, OrderKind } from '@/types'
 import type { PurchaseSummary, PurchaseTarget } from '@/components/marketplace/types'
+
+/** Artwork source for the summary tile (account products). */
+export type PurchaseLogo = Pick<AccountProduct, 'title' | 'logoUrl' | 'emoji' | 'gradient'>
 
 interface CouponState {
   /** Coupon state is scoped to one product so a new sheet opens clean. */
@@ -45,9 +49,9 @@ export interface PurchaseConfirmSheetProps {
   currency?: Currency
   /** Optional product subtitle shown under the title in the summary row. */
   description?: string
-  /** Emoji used for the product artwork summary tile (account products). */
-  emoji?: string
-  /** Lucide icon used for the summary tile when there is no emoji (VPN plans). */
+  /** Account product whose real brand logo heads the summary row. */
+  logo?: PurchaseLogo
+  /** Lucide icon used for the summary tile when there is no product logo (VPN plans). */
   icon?: LucideIcon
   /** Catalogue the purchase belongs to; stored on the order row. */
   kind?: OrderKind
@@ -73,7 +77,7 @@ export function PurchaseConfirmSheet({
   price,
   currency = 'IRT',
   description,
-  emoji,
+  logo,
   icon: Icon,
   kind = 'account',
   onConfirm,
@@ -258,15 +262,24 @@ export function PurchaseConfirmSheet({
         {target ? (
           <div className="space-y-3">
             <div className="flex items-center gap-3 rounded-2xl border border-tg-separator bg-tg-secondary-bg/60 p-3">
-              <span className="flex size-12 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-brand-500 to-brand-700 text-[22px] leading-none text-white shadow-sm shadow-brand-500/25 ring-1 ring-white/25">
-                {emoji?.trim() ? (
-                  <span aria-hidden className="emoji-glyph">{emoji}</span>
-                ) : Icon ? (
-                  <Icon className="size-5" aria-hidden />
-                ) : (
-                  <ShieldCheck className="size-5" aria-hidden />
-                )}
-              </span>
+              {logo ? (
+                <BrandLogo
+                  product={logo}
+                  size="lg"
+                  className={cn(
+                    'bg-gradient-to-br text-white shadow-sm shadow-brand-500/25 ring-1 ring-white/25',
+                    logo.gradient ?? 'from-brand-500 to-brand-700',
+                  )}
+                />
+              ) : (
+                <span className="flex size-12 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-brand-500 to-brand-700 text-white shadow-sm shadow-brand-500/25 ring-1 ring-white/25">
+                  {Icon ? (
+                    <Icon className="size-5" aria-hidden />
+                  ) : (
+                    <ShieldCheck className="size-5" aria-hidden />
+                  )}
+                </span>
+              )}
 
               <div className="min-w-0 flex-1">
                 <p className="truncate text-[13.5px] font-semibold text-tg-text">{target.title}</p>

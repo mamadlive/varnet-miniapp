@@ -6,7 +6,17 @@ const SIZES = {
   sm: 'size-9',
   md: 'size-10',
   lg: 'size-12',
+  xl: 'size-16',
+  '2xl': 'size-24',
 } as const
+
+const EMOJI_SIZES: Record<keyof typeof SIZES, string> = {
+  sm: 'text-[20px]',
+  md: 'text-[22px]',
+  lg: 'text-[26px]',
+  xl: 'text-[34px]',
+  '2xl': 'text-[46px]',
+}
 
 export interface BrandLogoProps {
   product: Pick<AccountProduct, 'title' | 'logoUrl' | 'emoji'>
@@ -26,10 +36,10 @@ function secondaryLogoUrl(src: string): string | undefined {
 }
 
 /**
- * Glass circle carrying the brand's real logo. Image hosts can fail (offline,
- * blocked CDN, missing domain), so failures are tracked per URL — each source
- * is tried once — and the container degrades to the dictionary emoji or the
- * caller-provided icon.
+ * Glass circle carrying the brand's real logo, full-bleed to the container
+ * edge. Image hosts can fail (offline, blocked CDN, missing domain), so
+ * failures are tracked per URL — each source is tried once — and the container
+ * degrades to the dictionary emoji or the caller-provided icon.
  */
 export function BrandLogo({
   product,
@@ -61,18 +71,21 @@ export function BrandLogo({
           loading="lazy"
           decoding="async"
           referrerPolicy="no-referrer"
-          className="h-full w-full object-contain p-1"
+          className="h-full w-full rounded-full object-cover"
           onError={() => setFailed((prev) => ({ ...prev, [active]: true }))}
         />
       ) : product.emoji?.trim() ? (
         <span
           aria-hidden
-          className={cn('emoji-glyph select-none text-[22px] leading-none drop-shadow', emojiClassName)}
+          className={cn(
+            'emoji-glyph select-none leading-none drop-shadow',
+            emojiClassName ?? EMOJI_SIZES[size],
+          )}
         >
           {product.emoji}
         </span>
       ) : (
-        (fallback ?? <span aria-hidden className="emoji-glyph text-[22px] leading-none">📦</span>)
+        (fallback ?? <span aria-hidden className={cn('emoji-glyph leading-none', EMOJI_SIZES[size])}>📦</span>)
       )}
     </span>
   )

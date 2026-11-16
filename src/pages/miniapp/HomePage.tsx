@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
+import type { LucideIcon } from 'lucide-react'
 import {
   CheckCircle2,
   Globe,
@@ -20,7 +21,6 @@ import {
   VpnOfferCardSkeleton,
 } from '@/components/marketplace'
 import type { MarketplaceTab, PurchaseTarget } from '@/components/marketplace'
-import { toFlagEmoji } from '@/components/miniapp/flags'
 import { OpenVpnNotice } from '@/components/miniapp/OpenVpnNotice'
 import { VpnDeliverySheet } from '@/components/miniapp/VpnDeliverySheet'
 import { WalletPill } from '@/components/miniapp/WalletPill'
@@ -60,7 +60,10 @@ interface PendingPurchase {
   price: number
   currency: Currency
   description?: string
-  emoji?: string
+  /** Account product whose real logo heads the confirmation summary. */
+  logo?: AccountProduct
+  /** Icon for offers without a brand logo (VPN plans). */
+  icon?: LucideIcon
   kind: OrderKind
 }
 
@@ -217,7 +220,7 @@ export default function HomePage() {
           price: product.price,
           currency: product.currency,
           description: product.subtitle ?? product.description,
-          emoji: product.emoji,
+          logo: product,
           kind: 'account',
         })
         return
@@ -230,7 +233,7 @@ export default function HomePage() {
           price: plan.price,
           currency: plan.currency,
           description: `${plan.location} · ${formatCount(plan.durationDays)} روز`,
-          emoji: toFlagEmoji(plan.countryCode),
+          icon: Globe,
           kind: 'vpn',
         })
         return
@@ -523,7 +526,8 @@ export default function HomePage() {
         price={pendingPurchase?.price ?? 0}
         currency={pendingPurchase?.currency ?? 'IRT'}
         description={pendingPurchase?.description}
-        emoji={pendingPurchase?.emoji}
+        logo={pendingPurchase?.logo}
+        icon={pendingPurchase?.icon}
         kind={pendingPurchase?.kind}
         onConfirm={handlePurchaseConfirm}
         onCancel={handlePurchaseCancel}

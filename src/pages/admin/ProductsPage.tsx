@@ -18,6 +18,7 @@ import type { DataTableColumn } from '@/components/admin/AdminTable'
 import { FilterChips } from '@/components/admin/FilterChips'
 import type { FilterChipOption } from '@/components/admin/FilterChips'
 import { CategoryBadge } from '@/components/admin/StatusBadges'
+import { BrandLogo } from '@/components/marketplace'
 import { Badge } from '@/components/ui/Badge'
 import { Button } from '@/components/ui/Button'
 import { EmptyState } from '@/components/ui/EmptyState'
@@ -284,15 +285,13 @@ export default function ProductsPage() {
       header: 'محصول',
       render: (product) => (
         <div className="flex items-center gap-3">
-          <span
+          <BrandLogo
+            product={product}
             className={cn(
-              'flex size-10 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br text-lg shadow-sm ring-1 ring-black/5',
+              'bg-gradient-to-br shadow-sm ring-1 ring-black/5',
               product.gradient ?? 'from-brand-500 to-brand-700',
             )}
-            aria-hidden
-          >
-            {product.emoji ?? '🛍️'}
-          </span>
+          />
           <div className="min-w-0">
             <p className="truncate text-[13px] font-medium text-tg-text">{product.title}</p>
             <p className="truncate text-[11.5px] text-tg-hint">

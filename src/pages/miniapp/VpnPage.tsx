@@ -11,7 +11,6 @@ import {
   Wallet,
   Zap,
 } from 'lucide-react'
-import { toFlagEmoji } from '@/components/miniapp/flags'
 import { ActiveServiceCard, ActiveServiceCardSkeleton } from '@/components/miniapp/ActiveServiceCard'
 import { OpenVpnNotice } from '@/components/miniapp/OpenVpnNotice'
 import { VpnDeliverySheet } from '@/components/miniapp/VpnDeliverySheet'
@@ -577,7 +576,7 @@ export default function VpnPage() {
         price={selectedPlan?.price ?? 0}
         currency={selectedPlan?.currency ?? 'IRT'}
         description={purchaseDescription}
-        emoji={selectedPlan ? toFlagEmoji(selectedPlan.countryCode) : undefined}
+        icon={Globe}
         onConfirm={handlePurchaseConfirm}
         onCancel={handlePurchaseCancel}
       />

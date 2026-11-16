@@ -1,4 +1,5 @@
 import { Check, FileText, Star, StickyNote, Wallet, Zap } from 'lucide-react'
+import { BrandLogo } from '@/components/marketplace/BrandLogo'
 import { Badge, Button, Sheet } from '@/components/ui'
 import { useTelegram } from '@/hooks/useTelegram'
 import { formatCount, formatCurrency, formatNumber } from '@/lib/format'
@@ -69,14 +70,12 @@ export function ProductQuickView({ product, onClose, onPurchase }: ProductQuickV
         >
           <span aria-hidden className="absolute -left-6 -top-8 size-32 rounded-full bg-white/15 blur-2xl" />
           <span aria-hidden className="absolute -bottom-10 -right-6 size-32 rounded-full bg-black/10 blur-2xl" />
-          <span className="relative flex size-24 items-center justify-center rounded-full border border-white/30 bg-tg-secondary-bg/50 shadow-md ring-1 ring-white/20 backdrop-blur-md">
-            <span
-              aria-hidden
-              className="emoji-glyph select-none text-[44px] leading-none drop-shadow"
-            >
-              {product.emoji?.trim() || '📦'}
-            </span>
-          </span>
+          <BrandLogo
+            product={product}
+            size="2xl"
+            emojiClassName="text-[44px]"
+            className="relative border border-white/30 bg-tg-secondary-bg/50 shadow-md ring-1 ring-white/20 backdrop-blur-md"
+          />
           {product.badge ? (
             <Badge
               tone="warning"

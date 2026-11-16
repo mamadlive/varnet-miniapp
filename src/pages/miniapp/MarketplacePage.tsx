@@ -28,7 +28,8 @@ interface PendingPurchase {
   price: number
   currency: Currency
   description?: string
-  emoji?: string
+  /** Account product whose real logo heads the confirmation summary. */
+  logo?: AccountProduct
   kind: 'account' | 'vpn'
 }
 
@@ -122,7 +123,7 @@ export default function MarketplacePage() {
       price: product.price,
       currency: product.currency,
       description: product.subtitle,
-      emoji: product.emoji,
+      logo: product,
       kind: 'account',
     })
     setSelectedProduct(null)
@@ -296,7 +297,7 @@ export default function MarketplacePage() {
         price={pendingPurchase?.price ?? 0}
         currency={pendingPurchase?.currency ?? 'IRT'}
         description={pendingPurchase?.description}
-        emoji={pendingPurchase?.emoji}
+        logo={pendingPurchase?.logo}
         kind={pendingPurchase?.kind}
         onConfirm={handlePurchaseConfirm}
         onCancel={handlePurchaseCancel}
