@@ -11,6 +11,10 @@
  * the platform kills the request, which is exactly the timeout the admin sees.
  * 7 seconds fails fast while still covering a slow-but-healthy provider.
  *
+ * Every product passes through `localizeProviderProduct` (providerMapper.ts)
+ * *before* the D1 upsert, so Persian titles, brand emojis/gradients,
+ * descriptions and features are what get persisted — not the raw upstream copy.
+ *
  * Bindings (Pages dashboard / `.dev.vars`):
  *   ACCOUNTS_PROVIDER_API_KEY   secret, required
  *   ACCOUNTS_PROVIDER_BASE_URL  optional, defaults to the placeholder URL
@@ -21,6 +25,8 @@
  * this route only mirrors the public catalogue and is called by the admin panel.
  */
 
+import { localizeProviderProduct } from '../../src/lib/providerMapper'
+import type { AccountProduct } from '../../src/types'
 import {
   DEFAULT_PROVIDER_URL,
   MAX_PAYLOAD_BYTES,
@@ -28,7 +34,6 @@ import {
   extractRows,
   normalizeProduct,
   resolveUsdtRate,
-  type CatalogProduct,
 } from './provider/products'
 
 interface D1PreparedStatement {
@@ -68,8 +73,9 @@ const UPSERT_SQL = `
     id, title, subtitle, category, price, old_price,
     provider_price, provider_old_price, provider_currency, currency,
     stock, rating, review_count, badge, delivery_time, description,
-    features, gradient, emoji, synced_at, created_at, updated_at
-  ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    features, gradient, emoji, brand_key, provider_description,
+    synced_at, created_at, updated_at
+  ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   ON CONFLICT(id) DO UPDATE SET
     title = excluded.title,
     subtitle = excluded.subtitle,
@@ -89,6 +95,8 @@ const UPSERT_SQL = `
     features = excluded.features,
     gradient = excluded.gradient,
     emoji = excluded.emoji,
+    brand_key = excluded.brand_key,
+    provider_description = excluded.provider_description,
     synced_at = excluded.synced_at,
     updated_at = excluded.updated_at
 `
@@ -244,7 +252,7 @@ async function fetchProviderCatalog(providerUrl: URL, apiKey: string): Promise<u
   }
 }
 
-function toBindings(product: CatalogProduct, syncedAt: string): unknown[] {
+function toBindings(product: AccountProduct, syncedAt: string): unknown[] {
   return [
     product.id,
     product.title,
@@ -254,7 +262,7 @@ function toBindings(product: CatalogProduct, syncedAt: string): unknown[] {
     product.oldPrice ?? null,
     product.providerPrice ?? null,
     product.providerOldPrice ?? null,
-    product.providerCurrency,
+    product.providerCurrency ?? 'USDT',
     product.currency,
     product.stock,
     product.rating ?? null,
@@ -263,8 +271,10 @@ function toBindings(product: CatalogProduct, syncedAt: string): unknown[] {
     product.deliveryTime ?? null,
     product.description ?? null,
     product.features && product.features.length > 0 ? JSON.stringify(product.features) : null,
-    product.gradient,
-    product.emoji,
+    product.gradient ?? null,
+    product.emoji ?? null,
+    product.brandKey ?? null,
+    product.providerDescription ?? null,
     syncedAt,
     syncedAt,
     syncedAt,
@@ -278,7 +288,7 @@ function toBindings(product: CatalogProduct, syncedAt: string): unknown[] {
  */
 async function writeProducts(
   db: D1Database,
-  products: CatalogProduct[],
+  products: AccountProduct[],
   syncedAt: string,
 ): Promise<number> {
   let batches = 0
@@ -302,6 +312,25 @@ async function writeProducts(
   }
 
   return batches
+}
+
+/** Persist the rate used for this sync so every client prices identically. */
+async function writeSyncMeta(
+  db: D1Database,
+  usdtRate: number,
+  syncedAt: string,
+): Promise<void> {
+  try {
+    await db
+      .prepare(
+        `INSERT INTO sync_meta (key, value, updated_at) VALUES ('usdt_rate', ?, ?)
+         ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at`,
+      )
+      .bind(String(usdtRate), syncedAt)
+      .run()
+  } catch (cause) {
+    throw new SyncError('SYNC_DB_WRITE_FAILED', 'ثبت نرخ USDT در D1 ناموفق بود.', { cause })
+  }
 }
 
 export async function onRequestPost(context: PagesContext): Promise<Response> {
@@ -334,18 +363,20 @@ export async function onRequestPost(context: PagesContext): Promise<Response> {
       )
     }
 
-    const products: CatalogProduct[] = []
+    const products: AccountProduct[] = []
     const seen = new Set<string>()
     let skipped = 0
 
     for (const row of rows) {
-      const product = normalizeProduct(row, usdtRate)
-      if (!product || seen.has(product.id)) {
+      const normalized = normalizeProduct(row, usdtRate)
+      if (!normalized || seen.has(normalized.id)) {
         skipped += 1
         continue
       }
-      seen.add(product.id)
-      products.push(product)
+      seen.add(normalized.id)
+      // Apply the Persian dictionary before persisting: D1 must hold the
+      // mapped title/description/emoji/brand, never the raw upstream copy.
+      products.push(localizeProviderProduct(normalized))
     }
 
     if (products.length === 0) {
@@ -357,6 +388,7 @@ export async function onRequestPost(context: PagesContext): Promise<Response> {
 
     const syncedAt = new Date().toISOString()
     const batches = await writeProducts(db, products, syncedAt)
+    await writeSyncMeta(db, usdtRate, syncedAt)
 
     return jsonResponse({
       success: true,

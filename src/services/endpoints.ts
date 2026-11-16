@@ -12,6 +12,8 @@ export const endpoints = {
     products: '/api/provider/products',
     /** Persisting sync: fetches the upstream catalogue and upserts it into D1. */
     sync: '/api/sync',
+    /** Mini App catalogue read back from D1 (already dictionary-mapped). */
+    catalogue: '/api/products',
   },
 
   vpn: {

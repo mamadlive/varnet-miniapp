@@ -1,5 +1,5 @@
-import type { Currency } from '@/types'
-import { LOCALE } from '@/lib/i18n'
+import type { Currency } from '../types'
+import { LOCALE } from './i18n'
 
 const CURRENCY_UNITS: Record<Currency, string> = {
   IRT: 'تومان',

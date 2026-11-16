@@ -5,8 +5,9 @@ import {
   type ProfitMargin,
 } from '@/lib/pricing'
 import { localizeProviderProduct } from '@/lib/providerMapper'
-import { ApiError, apiPostProxy, isApiError } from '@/services/apiClient'
+import { ApiError, apiGetProxy, apiPostProxy, isApiError } from '@/services/apiClient'
 import { endpoints } from '@/services/endpoints'
+import { getTelegramInitData } from '@/services/telegram'
 import { useAdminStore } from '@/store/adminStore'
 import type { AccountProduct, PaginationQuery, ProductCategory } from '@/types'
 
@@ -22,6 +23,20 @@ export interface AccountProductQuery extends PaginationQuery {
  * a Cloudflare Pages Function that holds `ACCOUNTS_PROVIDER_API_KEY` server-side
  * and returns a normalized catalogue in Toman.
  */
+
+/** Envelope returned by `functions/api/products.ts`. */
+export interface ProviderCatalogEnvelope {
+  success: boolean
+  data?: AccountProduct[]
+  message?: string
+  code?: string
+  meta?: {
+    count?: number
+    /** USDT→Toman rate used by the last sync (stored in D1 `sync_meta`). */
+    usdtRate?: number
+    fetchedAt?: string
+  }
+}
 
 /** Envelope returned by `functions/api/sync.ts`. */
 export interface ProviderSyncEnvelope {
@@ -156,6 +171,35 @@ function describeSyncFailure(error: unknown): Error {
   })
 }
 
+function hasTelegramSession(): boolean {
+  return Boolean(getTelegramInitData())
+}
+
+/**
+ * Read the mapped catalogue from D1 (`GET /api/products`).
+ *
+ * Inside Telegram the server catalogue is the source of truth; the local store
+ * only exists so the desktop preview stays reviewable. Rows come back already
+ * localized, and the endpoint re-runs the mapper for rows stored before the
+ * dictionary existed.
+ */
+async function fetchCatalogueFromServer(): Promise<AccountProduct[]> {
+  const payload = await apiGetProxy<ProviderCatalogEnvelope>(endpoints.provider.catalogue)
+
+  if (!payload || payload.success !== true || !Array.isArray(payload.data)) {
+    throw new ApiError(payload?.message || 'پاسخ کاتالوگ محصولات نامعتبر بود.', {
+      code: payload?.code,
+      details: payload,
+    })
+  }
+
+  if (payload.meta?.usdtRate) {
+    useAdminStore.getState().setServerUsdtRateToman(payload.meta.usdtRate)
+  }
+
+  return payload.data
+}
+
 /**
  * Persist the latest catalogue to D1 (`POST /api/sync`) and publish it to the
  * shared admin store — the Mini App reads the same store on its next render.
@@ -201,6 +245,14 @@ export async function syncAccountProducts(): Promise<AccountCatalogSyncResult> {
 export async function listAccountProducts(
   query: AccountProductQuery = {},
 ): Promise<AccountProduct[]> {
+  if (hasTelegramSession()) {
+    // Inside Telegram, D1 is the source of truth: the catalogue comes back
+    // already dictionary-mapped, so icons/Persian copy match the server rows.
+    // Fixtures stay only for the desktop preview without a Telegram session.
+    const serverProducts = await fetchCatalogueFromServer()
+    useAdminStore.getState().setProducts(serverProducts)
+  }
+
   const { category = 'all', search, includeHidden = false } = query
   const { products, hiddenProductIds, deletedProductIds } = useAdminStore.getState()
 

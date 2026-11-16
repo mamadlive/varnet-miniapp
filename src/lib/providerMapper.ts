@@ -1,5 +1,7 @@
-import { toPersianDigits } from '@/lib/format'
-import type { AccountProduct, ProductCategory } from '@/types'
+// Relative imports (not the `@/` alias) so the same dictionary can be bundled
+// into Cloudflare Pages Functions and applied during `/api/sync`.
+import { toPersianDigits } from './format'
+import type { AccountProduct, ProductCategory } from '../types'
 
 /**
  * Provider catalogue localization.

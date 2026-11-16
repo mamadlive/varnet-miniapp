@@ -9,7 +9,7 @@ import type {
   TransactionType,
   UserRole,
   VpnServerStatus,
-} from '@/types'
+} from '../types'
 
 /**
  * Central Persian (fa-IR) copy for labels shared across screens.
