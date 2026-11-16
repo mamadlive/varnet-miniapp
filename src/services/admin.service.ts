@@ -7,7 +7,6 @@ import {
   mockAdminStats,
   mockOrders,
   mockRevenueSeries,
-  mockUsers,
   mockVpnServers,
 } from '@/services/mocks'
 import { getTelegramInitData } from '@/services/telegram'
@@ -18,7 +17,9 @@ import type { AdminStats, Order, RevenuePoint, User, VpnServer } from '@/types'
  *
  * Users, wallet adjustments and margin tiers come from `/api/admin/*` Pages
  * Functions, authorized by the caller's Telegram `initData` plus an admin
- * allow-list. Dashboards, orders and servers still render local fixtures.
+ * allow-list. The user list is always D1-backed — never fixtures — so every
+ * row id is a valid wallet-adjustment target. Dashboards, orders and servers
+ * still render local fixtures.
  */
 
 interface AdminEnvelope<T> {
@@ -61,10 +62,6 @@ export async function fetchRevenueSeries(): Promise<RevenuePoint[]> {
 }
 
 export async function listUsers(): Promise<User[]> {
-  if (isAdminDemoPreview()) {
-    await sleep(260)
-    return mockUsers
-  }
   const users = await adminGet<User[]>(endpoints.admin.users)
   if (!Array.isArray(users)) throw new ApiError('فهرست کاربران دریافتی نامعتبر بود.')
   return users

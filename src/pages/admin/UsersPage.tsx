@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { Eye, RefreshCw, Search, UserRound, Wallet } from 'lucide-react'
+import { Eye, RefreshCw, Search, TriangleAlert, UserRound, Wallet } from 'lucide-react'
 import { AdminErrorState } from '@/components/admin/AdminStates'
 import { AdminPageHeader } from '@/components/admin/AdminPageHeader'
 import { DataTable } from '@/components/admin/AdminTable'
@@ -13,10 +13,33 @@ import { Input } from '@/components/ui/Input'
 import { Sheet } from '@/components/ui/Sheet'
 import { formatCount, formatCurrency, formatDate } from '@/lib/format'
 import { fa } from '@/lib/i18n'
-import { adjustUserWallet, isAdminDemoPreview, listUsers } from '@/services/admin.service'
+import { adjustUserWallet, listUsers } from '@/services/admin.service'
+import { isApiError } from '@/services/apiClient'
 import type { User } from '@/types'
 
 type AdjustDirection = 'credit' | 'debit'
+
+interface AdjustFailure {
+  message: string
+  code?: string
+  status?: number
+}
+
+const ADJUST_ERROR_TITLES: Record<string, string> = {
+  ADJUST_VALIDATION: 'مبلغ تعدیل نامعتبر است',
+  USER_NOT_FOUND: 'کاربر در پایگاه داده پیدا نشد',
+  ADMIN_FORBIDDEN: 'دسترسی مدیریتی رد شد',
+  TELEGRAM_AUTH_INVALID: 'نشست تلگرام معتبر نیست',
+  TELEGRAM_AUTH_REQUIRED: 'ورود از داخل تلگرام لازم است',
+  INSUFFICIENT_BALANCE: 'موجودی کاربر کافی نیست',
+  BALANCE_CONFLICT: 'موجودی هم‌زمان تغییر کرد',
+  DB_UNAVAILABLE: 'خطای پایگاه داده',
+  DB_NOT_CONFIGURED: 'پایگاه داده در سرور تنظیم نشده است',
+}
+
+function adjustFailureTitle(failure: AdjustFailure): string {
+  return (failure.code && ADJUST_ERROR_TITLES[failure.code]) || 'ثبت تعدیل انجام نشد'
+}
 
 function fullName(user: User): string {
   return `${user.firstName} ${user.lastName ?? ''}`.trim()
@@ -125,7 +148,7 @@ export default function UsersPage() {
   const [amountInput, setAmountInput] = useState('')
   const [note, setNote] = useState('')
   const [adjusting, setAdjusting] = useState(false)
-  const [adjustError, setAdjustError] = useState<string | null>(null)
+  const [adjustError, setAdjustError] = useState<AdjustFailure | null>(null)
   const [adjustedBalance, setAdjustedBalance] = useState<number | null>(null)
 
   const load = useCallback(async () => {
@@ -190,24 +213,28 @@ export default function UsersPage() {
   const submitAdjustment = async () => {
     if (!adjustTarget) return
     if (!hasValidAmount) {
-      setAdjustError('مبلغ باید یک عدد صحیح بزرگ‌تر از صفر (تومان) باشد.')
+      setAdjustError({
+        message: 'مبلغ باید یک عدد صحیح بزرگ‌تر از صفر (تومان) باشد.',
+        code: 'ADJUST_VALIDATION',
+      })
       return
     }
     if (direction === 'debit' && projectedBalance < 0) {
-      setAdjustError('مبلغ کسر بیش از موجودی کاربر است.')
+      setAdjustError({
+        message: 'مبلغ کسر بیش از موجودی کاربر است.',
+        code: 'ADJUST_VALIDATION',
+      })
       return
     }
 
     setAdjusting(true)
     setAdjustError(null)
     try {
-      const nextBalance = isAdminDemoPreview()
-        ? projectedBalance
-        : (await adjustUserWallet({
-            userId: adjustTarget.id,
-            amount: signedAmount,
-            note: note.trim() || undefined,
-          })).balance
+      const { balance: nextBalance } = await adjustUserWallet({
+        userId: adjustTarget.id,
+        amount: signedAmount,
+        note: note.trim() || undefined,
+      })
 
       setUsers((previous) =>
         previous.map((user) =>
@@ -216,7 +243,11 @@ export default function UsersPage() {
       )
       setAdjustedBalance(nextBalance)
     } catch (err) {
-      setAdjustError(err instanceof Error ? err.message : 'تعدیل موجودی انجام نشد.')
+      setAdjustError({
+        message: err instanceof Error ? err.message : 'تعدیل موجودی انجام نشد.',
+        code: isApiError(err) ? err.code : undefined,
+        status: isApiError(err) ? err.status : undefined,
+      })
     } finally {
       setAdjusting(false)
     }
@@ -358,6 +389,30 @@ export default function UsersPage() {
               </span>
             </div>
 
+            {adjustedBalance === null && adjustError ? (
+              <div
+                role="alert"
+                className="rounded-xl border border-rose-500/30 bg-rose-500/10 px-3 py-2.5 text-[12.5px] text-rose-700"
+              >
+                <div className="flex items-start gap-2">
+                  <TriangleAlert className="mt-0.5 size-4 shrink-0" aria-hidden />
+                  <div className="min-w-0">
+                    <p className="font-semibold">{adjustFailureTitle(adjustError)}</p>
+                    <p className="mt-0.5 leading-relaxed">{adjustError.message}</p>
+                    {adjustError.code ? (
+                      <p className="mt-1 text-[11px] opacity-80">
+                        کد خطا:{' '}
+                        <span className="bidi-ltr">
+                          {adjustError.code}
+                          {adjustError.status ? ` · HTTP ${adjustError.status}` : ''}
+                        </span>
+                      </p>
+                    ) : null}
+                  </div>
+                </div>
+              </div>
+            ) : null}
+
             {adjustedBalance !== null ? (
               <div className="rounded-xl border border-emerald-500/25 bg-emerald-500/10 px-3 py-3 text-[12.5px] text-emerald-700">
                 <p className="font-semibold">تعدیل با موفقیت ثبت شد و در تاریخچه کیف پول ذخیره شد.</p>
@@ -409,7 +464,7 @@ export default function UsersPage() {
                   }}
                   placeholder="مثلاً 500000"
                   className="tabular-nums"
-                  error={adjustError ?? undefined}
+                  aria-invalid={adjustError ? true : undefined}
                   hint={
                     hasValidAmount
                       ? `موجودی پس از ثبت: ${formatCurrency(projectedBalance, adjustTarget.currency)}`
