@@ -10,6 +10,8 @@ export const endpoints = {
   /** Same-origin Cloudflare Pages Functions (never the RADIUS host). */
   provider: {
     products: '/api/provider/products',
+    /** Persisting sync: fetches the upstream catalogue and upserts it into D1. */
+    sync: '/api/sync',
   },
 
   vpn: {

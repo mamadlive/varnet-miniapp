@@ -31,7 +31,7 @@ interface PagesContext {
 
 type ProductCategory = 'streaming' | 'ai' | 'gaming' | 'design' | 'social' | 'other'
 
-interface CatalogProduct {
+export interface CatalogProduct {
   id: string
   title: string
   subtitle?: string
@@ -57,9 +57,12 @@ interface CatalogProduct {
   emoji: string
 }
 
-const DEFAULT_PROVIDER_URL = 'https://api.dummy-provider.com/v1/products'
+export const DEFAULT_PROVIDER_URL = 'https://api.dummy-provider.com/v1/products'
+/** Workers sends no User-Agent by default; upstream WAFs tarpit headerless requests. */
+export const PROVIDER_USER_AGENT =
+  'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
 const UPSTREAM_TIMEOUT_MS = 10_000
-const MAX_PAYLOAD_BYTES = 2_000_000
+export const MAX_PAYLOAD_BYTES = 2_000_000
 const DEFAULT_USDT_RATE_TOMAN = 70_000
 
 const RESPONSE_HEADERS = {
@@ -136,7 +139,7 @@ function firstStringArray(
 }
 
 /** USDT rate from the environment; a missing or invalid value uses 70,000. */
-function resolveUsdtRate(raw: string | undefined): number {
+export function resolveUsdtRate(raw: string | undefined): number {
   const value = Number(raw)
   return Number.isFinite(value) && value > 0 ? value : DEFAULT_USDT_RATE_TOMAN
 }
@@ -174,7 +177,7 @@ function slugify(value: string): string {
     .slice(0, 48)
 }
 
-function normalizeProduct(raw: unknown, usdtRate: number): CatalogProduct | null {
+export function normalizeProduct(raw: unknown, usdtRate: number): CatalogProduct | null {
   if (!raw || typeof raw !== 'object') return null
   const record = raw as Record<string, unknown>
 
@@ -233,7 +236,7 @@ function normalizeProduct(raw: unknown, usdtRate: number): CatalogProduct | null
 }
 
 /** Accept a bare array or the common provider envelopes. */
-function extractRows(payload: unknown): unknown[] | null {
+export function extractRows(payload: unknown): unknown[] | null {
   if (Array.isArray(payload)) return payload
   if (!payload || typeof payload !== 'object') return null
 
@@ -291,10 +294,7 @@ export async function onRequestGet(context: PagesContext): Promise<Response> {
       headers: {
         Accept: 'application/json',
         Authorization: `Bearer ${apiKey}`,
-        // Workers sends no User-Agent by default; Cloudflare WAF on the
-        // upstream tarpits headerless requests, so identify as a browser.
-        'User-Agent':
-          'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        'User-Agent': PROVIDER_USER_AGENT,
       },
       signal: controller.signal,
     })

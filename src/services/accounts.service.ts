@@ -5,7 +5,7 @@ import {
   type ProfitMargin,
 } from '@/lib/pricing'
 import { localizeProviderProduct } from '@/lib/providerMapper'
-import { apiGetProxy } from '@/services/apiClient'
+import { ApiError, apiPostProxy, isApiError } from '@/services/apiClient'
 import { endpoints } from '@/services/endpoints'
 import { useAdminStore } from '@/store/adminStore'
 import type { AccountProduct, PaginationQuery, ProductCategory } from '@/types'
@@ -23,17 +23,31 @@ export interface AccountProductQuery extends PaginationQuery {
  * and returns a normalized catalogue in Toman.
  */
 
-/** Envelope returned by `functions/api/provider/products.ts`. */
-export interface ProviderCatalogEnvelope {
+/** Envelope returned by `functions/api/sync.ts`. */
+export interface ProviderSyncEnvelope {
   success: boolean
-  data: AccountProduct[]
-  message?: string
+  data?: {
+    products?: AccountProduct[]
+    synced?: number
+    skipped?: number
+    /** D1 `batch()` round-trips the server needed for this sync. */
+    batches?: number
+    syncedAt?: string
+    usdtRate?: number
+  }
   meta?: {
     count?: number
     skipped?: number
     fetchedAt?: string
     /** Toman per USDT as resolved from `USDT_RATE_TOMAN` on the server. */
     usdtRate?: number
+  }
+  message?: string
+  code?: string
+  error?: {
+    name?: unknown
+    message?: unknown
+    cause?: unknown
   }
 }
 
@@ -108,39 +122,80 @@ function withPricing(product: AccountProduct): AccountProduct {
   }
 }
 
-async function fetchProviderCatalog(): Promise<AccountCatalogSyncResult> {
-  const payload = await apiGetProxy<ProviderCatalogEnvelope>(endpoints.provider.products)
-
-  if (!payload || payload.success !== true || !Array.isArray(payload.data)) {
-    throw new Error(payload?.message || 'پاسخ کاتالوگ ارائه‌دهنده نامعتبر بود.')
+/** Flatten the server's nested `error.cause` chain into one readable string. */
+function flattenSyncCause(value: unknown, depth = 0): string | null {
+  if (value === undefined || value === null || depth > 3) return null
+  if (typeof value === 'string') return value.trim() || null
+  if (typeof value === 'number' || typeof value === 'boolean') return String(value)
+  if (typeof value === 'object') {
+    const record = value as Record<string, unknown>
+    const own = [record.name, record.message]
+      .filter((part): part is string => typeof part === 'string' && part.trim().length > 0)
+      .join(': ')
+    const nested = flattenSyncCause(record.cause, depth + 1)
+    return [own || null, nested].filter(Boolean).join(' → ') || null
   }
-
-  if (payload.meta?.usdtRate) {
-    useAdminStore.getState().setServerUsdtRateToman(payload.meta.usdtRate)
-  }
-
-  return {
-    products: payload.data.map(localizeProviderProduct),
-    skipped: payload.meta?.skipped ?? 0,
-    fetchedAt: payload.meta?.fetchedAt ?? new Date().toISOString(),
-  }
+  return null
 }
 
 /**
- * Pull the latest catalogue through the secure proxy and publish it to the
+ * Append the server's cause chain to HTTP errors so the admin panel shows
+ * whether the failure came from the upstream firewall or from D1.
+ */
+function describeSyncFailure(error: unknown): Error {
+  if (!isApiError(error)) {
+    return error instanceof Error ? error : new Error('همگام‌سازی محصولات ممکن نشد.')
+  }
+  const detail = (error.details as { error?: { cause?: unknown } } | undefined)?.error
+  const cause = flattenSyncCause(detail?.cause)
+  if (!cause || error.message.includes(cause)) return error
+  return new ApiError(`${error.message} — ${cause}`, {
+    status: error.status,
+    code: error.code,
+    details: error.details,
+  })
+}
+
+/**
+ * Persist the latest catalogue to D1 (`POST /api/sync`) and publish it to the
  * shared admin store — the Mini App reads the same store on its next render.
  *
- * Proxy failures propagate untouched: the admin UI must show the real cause
- * (`PROVIDER_KEY_MISSING`, `PROVIDER_UNAVAILABLE`, …) instead of masking it
- * with fixture data.
+ * Server failures propagate with their technical cause (`SYNC_UPSTREAM_TIMEOUT`,
+ * `SYNC_DB_WRITE_FAILED`, …) instead of being masked with fixture data.
  */
 export async function syncAccountProducts(): Promise<AccountCatalogSyncResult> {
-  const { products, skipped, fetchedAt } = await fetchProviderCatalog()
+  let payload: ProviderSyncEnvelope
+  try {
+    payload = await apiPostProxy<ProviderSyncEnvelope>(endpoints.provider.sync, {})
+  } catch (error) {
+    throw describeSyncFailure(error)
+  }
+
+  const data = payload?.data
+  if (!payload || payload.success !== true || !Array.isArray(data?.products)) {
+    const technical = flattenSyncCause(payload?.error?.cause)
+    const base = payload?.message || 'پاسخ همگام‌سازی محصولات نامعتبر بود.'
+    throw new ApiError(technical ? `${base} — ${technical}` : base, {
+      code: payload?.code,
+      details: payload,
+    })
+  }
+
+  const rate = data.usdtRate ?? payload.meta?.usdtRate
+  if (rate) useAdminStore.getState().setServerUsdtRateToman(rate)
+
   const { deletedProductIds, setProducts } = useAdminStore.getState()
   // A product the admin deleted must stay deleted across provider re-syncs.
-  const kept = products.filter((product) => !deletedProductIds.includes(product.id))
+  const kept = data.products
+    .map(localizeProviderProduct)
+    .filter((product) => !deletedProductIds.includes(product.id))
   setProducts(kept)
-  return { products: kept, skipped, fetchedAt }
+
+  return {
+    products: kept,
+    skipped: data.skipped ?? payload.meta?.skipped ?? 0,
+    fetchedAt: data.syncedAt ?? payload.meta?.fetchedAt ?? new Date().toISOString(),
+  }
 }
 
 export async function listAccountProducts(

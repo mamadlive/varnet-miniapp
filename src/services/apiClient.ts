@@ -249,6 +249,20 @@ export async function apiGetProxy<T>(url: string, config?: AxiosRequestConfig): 
   }
 }
 
+/** POST counterpart of `apiGetProxy` for same-origin Pages Functions. */
+export async function apiPostProxy<T, TBody = unknown>(
+  url: string,
+  body?: TBody,
+  config?: AxiosRequestConfig,
+): Promise<T> {
+  try {
+    const { data } = await axios.post<T>(url, body, { timeout: env.apiTimeoutMs, ...config })
+    return data
+  } catch (error) {
+    throw normalizeApiError(error)
+  }
+}
+
 export async function apiGetData<T>(url: string, config?: AxiosRequestConfig): Promise<T> {
   return unwrapApiEnvelope(await apiGet<ApiEnvelope<T> | T>(url, config))
 }
