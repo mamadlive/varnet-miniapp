@@ -140,7 +140,7 @@ export const fa = {
     purchaseConfirm: (title: string, price: string) =>
       `آیا از خرید «${title}» با قیمت ${price} مطمئن هستید؟`,
     purchaseSuccess: (title: string) => `خرید ثبت شد · ${title}`,
-    purchaseNote: 'پس از تایید، خرید در کنسول ثبت می‌شود (نسخه نمایشی).',
+    purchaseNote: 'مبلغ از موجودی کیف پول کسر و سفارش شما ثبت می‌شود.',
   },
 
   wallet: {

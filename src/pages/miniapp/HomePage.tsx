@@ -36,7 +36,7 @@ import { listAccountProducts } from '@/services/accounts.service'
 import { listVpnPlans } from '@/services/vpn.service'
 import { useAuthStore } from '@/store/authStore'
 import { useWalletStore } from '@/store/walletStore'
-import type { AccountProduct, Currency, VpnPlan } from '@/types'
+import type { AccountProduct, Currency, OrderKind, VpnPlan } from '@/types'
 
 function greetingForHour(hour: number): string {
   if (hour < 5) return 'شب بخیر'
@@ -61,6 +61,7 @@ interface PendingPurchase {
   currency: Currency
   description?: string
   emoji?: string
+  kind: OrderKind
 }
 
 function SectionHeading({
@@ -116,7 +117,7 @@ function TrustStrip() {
  * One screen, two catalogues: digital accounts and Static IP VPNs. Data comes
  * from the service layer (mock-backed until the FastAPI endpoints are wired).
  * Tapping «خرید» opens the shared `PurchaseConfirmSheet`; only «تایید و پرداخت»
- * records the purchase (console, for now) and shows the success toast.
+ * charges the wallet, records the order in D1 and shows the success toast.
  */
 export default function HomePage() {
   const { haptic } = useTelegram()
@@ -217,6 +218,7 @@ export default function HomePage() {
           currency: product.currency,
           description: product.subtitle ?? product.description,
           emoji: product.emoji,
+          kind: 'account',
         })
         return
       }
@@ -229,11 +231,12 @@ export default function HomePage() {
           currency: plan.currency,
           description: `${plan.location} · ${formatCount(plan.durationDays)} روز`,
           emoji: toFlagEmoji(plan.countryCode),
+          kind: 'vpn',
         })
         return
       }
 
-      setPendingPurchase({ target, price: 0, currency: 'IRT' })
+      setPendingPurchase({ target, price: 0, currency: 'IRT', kind: 'account' })
     },
     [haptic, plans, products],
   )
@@ -500,7 +503,7 @@ export default function HomePage() {
         ورنت · اکانت‌های دیجیتال و آی‌پی ثابت
       </p>
 
-      {/* Purchase feedback (demo mode — the real flow opens checkout) */}
+      {/* Purchase feedback shown after a successful wallet debit */}
       {toast ? (
         <div className="pointer-events-none fixed inset-x-0 bottom-24 z-40 flex justify-center px-4">
           <div
@@ -521,6 +524,7 @@ export default function HomePage() {
         currency={pendingPurchase?.currency ?? 'IRT'}
         description={pendingPurchase?.description}
         emoji={pendingPurchase?.emoji}
+        kind={pendingPurchase?.kind}
         onConfirm={handlePurchaseConfirm}
         onCancel={handlePurchaseCancel}
       />

@@ -1,7 +1,7 @@
 import { useId, useState } from 'react'
 import { Link } from 'react-router-dom'
 import type { LucideIcon } from 'lucide-react'
-import { ShieldAlert, ShieldCheck, TicketPercent, Wallet, X } from 'lucide-react'
+import { AlertTriangle, ShieldAlert, ShieldCheck, TicketPercent, Wallet, X } from 'lucide-react'
 import { VerificationSheet } from '@/components/miniapp/VerificationSheet'
 import { Button } from '@/components/ui/Button'
 import { Input } from '@/components/ui/Input'
@@ -10,10 +10,13 @@ import { useTelegram } from '@/hooks/useTelegram'
 import { formatCurrency } from '@/lib/format'
 import { fa } from '@/lib/i18n'
 import { cn } from '@/lib/utils'
+import { isApiError } from '@/services/apiClient'
 import { validateCoupon } from '@/services/coupons.service'
 import type { CouponValidation } from '@/services/coupons.service'
+import { purchaseProduct } from '@/services/purchase.service'
 import { useAuthStore } from '@/store/authStore'
-import type { Currency } from '@/types'
+import { useWalletStore } from '@/store/walletStore'
+import type { Currency, OrderKind } from '@/types'
 import type { PurchaseSummary, PurchaseTarget } from '@/components/marketplace/types'
 
 interface CouponState {
@@ -46,6 +49,8 @@ export interface PurchaseConfirmSheetProps {
   emoji?: string
   /** Lucide icon used for the summary tile when there is no emoji (VPN plans). */
   icon?: LucideIcon
+  /** Catalogue the purchase belongs to; stored on the order row. */
+  kind?: OrderKind
   /** Called with the priced result after the purchase is logged and confirmed. */
   onConfirm: (target: PurchaseTarget, summary: PurchaseSummary) => void
   /** Called on «انصراف», backdrop click, X or Escape. Never logs anything. */
@@ -60,7 +65,7 @@ export interface PurchaseConfirmSheetProps {
  * Responsibilities:
  * - requires phone verification before the first purchase (KYC gate),
  * - applies a discount code and recalculates the payable Toman amount,
- * - only «تایید و پرداخت» records the purchase (console, until checkout lands).
+ * - only «تایید و پرداخت» debits the wallet and records the order in D1.
  */
 export function PurchaseConfirmSheet({
   open,
@@ -70,6 +75,7 @@ export function PurchaseConfirmSheet({
   description,
   emoji,
   icon: Icon,
+  kind = 'account',
   onConfirm,
   onCancel,
   className,
@@ -81,6 +87,8 @@ export function PurchaseConfirmSheet({
 
   const [couponState, setCouponState] = useState<CouponState | null>(null)
   const [verificationOpen, setVerificationOpen] = useState(false)
+  const [submitting, setSubmitting] = useState(false)
+  const [submitError, setSubmitError] = useState<{ message: string; code?: string } | null>(null)
 
   const isOpen = open && target !== null
   const coupon =
@@ -128,28 +136,52 @@ export function PurchaseConfirmSheet({
     updateCoupon(EMPTY_COUPON)
   }
 
-  const handleConfirm = () => {
-    if (!target || !verified) return
-    // TODO(checkout): VPN plans → `provisionVpn()`; digital accounts → the
-    // third-party provider proxy once it exists.
-    console.log('[VarNet] Purchase clicked — product ID:', target.id, {
-      subtotal: price,
-      discount,
-      total,
-      coupon: coupon.applied?.coupon.code,
-    })
-    haptic('medium')
-    notify('success')
-    onConfirm(target, {
-      subtotal: price,
-      discount,
-      total,
-      currency,
-      coupon: coupon.applied?.coupon,
-    })
+  const handleConfirm = async () => {
+    if (!target || !verified || submitting) return
+
+    setSubmitError(null)
+    setSubmitting(true)
+
+    try {
+      const receipt = await purchaseProduct({
+        productId: target.id,
+        title: target.title,
+        kind,
+        subtotal: price,
+        discount,
+        total,
+        currency,
+        couponCode: coupon.applied?.coupon.code,
+      })
+
+      // D1 is the source of truth for the wallet — mirror the post-debit balance.
+      useWalletStore.getState().setBalance(receipt.balance)
+      useAuthStore.getState().setWalletBalance(receipt.balance)
+
+      haptic('medium')
+      notify('success')
+      onConfirm(target, {
+        subtotal: price,
+        discount,
+        total,
+        currency,
+        coupon: coupon.applied?.coupon,
+      })
+    } catch (cause) {
+      setSubmitError({
+        message: cause instanceof Error ? cause.message : 'پرداخت انجام نشد. دوباره تلاش کنید.',
+        code: isApiError(cause) ? cause.code : undefined,
+      })
+      haptic('heavy')
+      notify('error')
+    } finally {
+      setSubmitting(false)
+    }
   }
 
   const handleCancel = () => {
+    if (submitting) return
+    setSubmitError(null)
     setVerificationOpen(false)
     onCancel()
   }
@@ -164,17 +196,44 @@ export function PurchaseConfirmSheet({
         className={cn('max-h-[90dvh] overflow-y-auto', className)}
         footer={
           <div className="flex flex-col gap-2">
+            {submitError ? (
+              <div
+                role="alert"
+                className="flex items-start gap-2 rounded-2xl border border-red-500/25 bg-red-500/10 p-3"
+              >
+                <AlertTriangle className="mt-0.5 size-4 shrink-0 text-red-500" aria-hidden />
+                <div className="min-w-0">
+                  <p className="text-[12px] font-medium leading-relaxed text-red-600 dark:text-red-400">
+                    {submitError.message}
+                  </p>
+                  {submitError.code ? (
+                    <p className="mt-0.5 text-[10.5px] text-tg-hint">
+                      کد خطا: <span className="bidi-ltr">{submitError.code}</span>
+                    </p>
+                  ) : null}
+                </div>
+              </div>
+            ) : null}
+
             {verified ? (
               <>
                 <Button
                   fullWidth
                   size="lg"
+                  loading={submitting}
+                  disabled={total <= 0}
                   onClick={handleConfirm}
                   leftIcon={<Wallet className="size-4" aria-hidden />}
                 >
-                  {fa.common.confirmAndPay}
+                  {submitting ? 'در حال پرداخت…' : fa.common.confirmAndPay}
                 </Button>
-                <Button fullWidth size="md" variant="secondary" onClick={handleCancel}>
+                <Button
+                  fullWidth
+                  size="md"
+                  variant="secondary"
+                  disabled={submitting}
+                  onClick={handleCancel}
+                >
                   {fa.common.cancel}
                 </Button>
               </>
@@ -200,8 +259,8 @@ export function PurchaseConfirmSheet({
           <div className="space-y-3">
             <div className="flex items-center gap-3 rounded-2xl border border-tg-separator bg-tg-secondary-bg/60 p-3">
               <span className="flex size-12 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-brand-500 to-brand-700 text-[22px] leading-none text-white shadow-sm shadow-brand-500/25 ring-1 ring-white/25">
-                {emoji ? (
-                  <span aria-hidden>{emoji}</span>
+                {emoji?.trim() ? (
+                  <span aria-hidden className="emoji-glyph">{emoji}</span>
                 ) : Icon ? (
                   <Icon className="size-5" aria-hidden />
                 ) : (

@@ -29,6 +29,7 @@ interface PendingPurchase {
   currency: Currency
   description?: string
   emoji?: string
+  kind: 'account' | 'vpn'
 }
 
 function parseCategory(value: string | null): ProductCategory | 'all' {
@@ -122,6 +123,7 @@ export default function MarketplacePage() {
       currency: product.currency,
       description: product.subtitle,
       emoji: product.emoji,
+      kind: 'account',
     })
     setSelectedProduct(null)
   }, [])
@@ -295,6 +297,7 @@ export default function MarketplacePage() {
         currency={pendingPurchase?.currency ?? 'IRT'}
         description={pendingPurchase?.description}
         emoji={pendingPurchase?.emoji}
+        kind={pendingPurchase?.kind}
         onConfirm={handlePurchaseConfirm}
         onCancel={handlePurchaseCancel}
       />

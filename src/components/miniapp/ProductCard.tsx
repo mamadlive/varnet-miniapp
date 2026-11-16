@@ -41,8 +41,11 @@ export function ProductCard({ product, onSelect, className }: ProductCardProps) 
         <span aria-hidden className="absolute -left-5 -top-7 size-24 rounded-full bg-white/15 blur-xl" />
         <span aria-hidden className="absolute -bottom-9 -right-5 size-28 rounded-full bg-black/10 blur-xl" />
         <span className="relative flex size-10 items-center justify-center rounded-full border border-white/30 bg-tg-secondary-bg/50 shadow-sm ring-1 ring-white/20 backdrop-blur-md">
-          <span aria-hidden className="select-none text-[22px] leading-none drop-shadow">
-            {product.emoji ?? '📦'}
+          <span
+            aria-hidden
+            className="emoji-glyph select-none text-[22px] leading-none drop-shadow"
+          >
+            {product.emoji?.trim() || '📦'}
           </span>
         </span>
 

@@ -1,5 +1,4 @@
-import { useState } from 'react'
-import { Check, FileText, Info, Star, StickyNote, Wallet, Zap } from 'lucide-react'
+import { Check, FileText, Star, StickyNote, Wallet, Zap } from 'lucide-react'
 import { Badge, Button, Sheet } from '@/components/ui'
 import { useTelegram } from '@/hooks/useTelegram'
 import { formatCount, formatCurrency, formatNumber } from '@/lib/format'
@@ -10,22 +9,16 @@ import type { AccountProduct } from '@/types'
 export interface ProductQuickViewProps {
   product: AccountProduct
   onClose: () => void
-  /**
-   * Purchase affordance. When provided, the CTA hands the product to the parent
-   * (which opens the shared `PurchaseConfirmSheet`); otherwise the sheet keeps
-   * its local demo selection.
-   */
-  onPurchase?: (product: AccountProduct) => void
+  /** Hands the product to the parent, which opens the shared `PurchaseConfirmSheet`. */
+  onPurchase: (product: AccountProduct) => void
 }
 
 /**
- * Bottom-sheet product preview. Checkout is intentionally not wired to the
- * order API yet, so the CTA either opens the shared purchase confirmation sheet
- * or confirms the selection locally in demo mode.
+ * Bottom-sheet product preview. The CTA forwards the product to the parent,
+ * which opens `PurchaseConfirmSheet` — the only place a wallet debit can start.
  */
 export function ProductQuickView({ product, onClose, onPurchase }: ProductQuickViewProps) {
-  const { haptic, notify } = useTelegram()
-  const [selected, setSelected] = useState(false)
+  const { haptic } = useTelegram()
 
   const outOfStock = product.stock <= 0
   const features = product.features ?? []
@@ -36,13 +29,8 @@ export function ProductQuickView({ product, onClose, onPurchase }: ProductQuickV
       : undefined
 
   const handleSelect = () => {
-    if (onPurchase) {
-      onPurchase(product)
-      return
-    }
     haptic('medium')
-    notify('success')
-    setSelected(true)
+    onPurchase(product)
   }
 
   return (
@@ -82,8 +70,11 @@ export function ProductQuickView({ product, onClose, onPurchase }: ProductQuickV
           <span aria-hidden className="absolute -left-6 -top-8 size-32 rounded-full bg-white/15 blur-2xl" />
           <span aria-hidden className="absolute -bottom-10 -right-6 size-32 rounded-full bg-black/10 blur-2xl" />
           <span className="relative flex size-24 items-center justify-center rounded-full border border-white/30 bg-tg-secondary-bg/50 shadow-md ring-1 ring-white/20 backdrop-blur-md">
-            <span aria-hidden className="select-none text-[44px] leading-none drop-shadow">
-              {product.emoji ?? '📦'}
+            <span
+              aria-hidden
+              className="emoji-glyph select-none text-[44px] leading-none drop-shadow"
+            >
+              {product.emoji?.trim() || '📦'}
             </span>
           </span>
           {product.badge ? (
@@ -184,14 +175,6 @@ export function ProductQuickView({ product, onClose, onPurchase }: ProductQuickV
           </span>
         </div>
 
-        {selected ? (
-          <div className="flex animate-fade-in items-start gap-2 rounded-xl border border-tg-separator bg-tg-bg p-3">
-            <Info className="mt-0.5 size-4 shrink-0 text-tg-link" aria-hidden />
-            <p className="text-[12px] leading-relaxed text-tg-text">
-              نسخه نمایشی — پرداختی انجام نشد. در نسخه بعدی، پرداخت به سرویس کیف پول متصل می‌شود.
-            </p>
-          </div>
-        ) : null}
       </div>
     </Sheet>
   )

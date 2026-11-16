@@ -22,6 +22,8 @@ interface WalletState {
   loadTransactions: () => Promise<void>
   topUp: (amount: number) => Promise<void>
   adjustBalance: (delta: number) => void
+  /** Sync with the server-reported balance after a wallet debit/credit. */
+  setBalance: (balance: number) => void
   /** Formatted balance bound to the current currency, e.g. `۲,۴۸۰,۰۰۰ تومان`. */
   formatBalance: () => string
 }
@@ -85,6 +87,10 @@ export const useWalletStore = create<WalletState>((set, get) => ({
 
   adjustBalance: (delta) => {
     set((state) => ({ balance: Math.max(state.balance + delta, 0) }))
+  },
+
+  setBalance: (balance) => {
+    set({ balance: Math.max(0, Math.round(balance)), status: 'ready', error: null })
   },
 
   formatBalance: () => formatCurrency(get().balance, get().currency),
