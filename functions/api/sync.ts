@@ -6,10 +6,11 @@
  * receives JSON with the exact `error.message` / `error.cause` instead of a
  * Cloudflare `ERR_BAD_RESPONSE` timeout page.
  *
- * Why the 7s abort: if the upstream WAF starts blocking Cloudflare egress IPs
+ * Why the 15s abort: if the upstream WAF starts blocking Cloudflare egress IPs
  * it tarpits the connection. Without an AbortController the Worker waits until
  * the platform kills the request, which is exactly the timeout the admin sees.
- * 7 seconds fails fast while still covering a slow-but-healthy provider.
+ * 15 seconds gives a slow-but-healthy provider room to finish while still
+ * failing fast enough for the admin panel to show the diagnostic cause.
  *
  * Every product passes through `localizeProviderProduct` (providerMapper.ts)
  * *before* the D1 upsert, so Persian titles, brand emojis/gradients,
@@ -58,7 +59,7 @@ interface PagesContext {
   env: SyncEnv
 }
 
-const UPSTREAM_TIMEOUT_MS = 7_000
+const UPSTREAM_TIMEOUT_MS = 15_000
 /** Statements per D1 batch — keeps each Worker invocation well under limits. */
 const PRODUCTS_PER_BATCH = 50
 
