@@ -59,3 +59,21 @@ export function applyTheme(theme: AppTheme): void {
     .querySelector('meta[name="theme-color"]')
     ?.setAttribute('content', THEME_COLORS[theme])
 }
+
+/**
+ * Apply a palette the user picked by hand. The `theme-explicit` class makes the
+ * stylesheet tokens `!important`, so the Telegram client's inline
+ * `--tg-theme-*` values can no longer overwrite the choice.
+ */
+export function applyExplicitTheme(theme: AppTheme): void {
+  if (typeof document === 'undefined') return
+  applyTheme(theme)
+  document.documentElement.classList.add('theme-explicit')
+}
+
+/** Apply the client/system palette and hand color authority back to Telegram. */
+export function applyAdaptiveTheme(theme: AppTheme): void {
+  if (typeof document === 'undefined') return
+  applyTheme(theme)
+  document.documentElement.classList.remove('theme-explicit')
+}

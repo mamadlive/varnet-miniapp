@@ -55,6 +55,44 @@
   --tg-theme-section-separator-color: rgba(255, 255, 255, 0.08);
 }
 
+/* Manual Mini App palette (`html.theme-explicit`).
+   Telegram writes its own `--tg-theme-*` values inline on <html>, which beat
+   every stylesheet declaration. `!important` restores the user's explicit
+   light/dark click as the highest authority until the class is removed. */
+:root.theme-explicit[data-theme="light"] {
+  --tg-theme-bg-color: #ffffff !important;
+  --tg-theme-secondary-bg-color: #f1f1f4 !important;
+  --tg-theme-text-color: #0f0f0f !important;
+  --tg-theme-hint-color: #707579 !important;
+  --tg-theme-link-color: #2481cc !important;
+  --tg-theme-button-color: #2481cc !important;
+  --tg-theme-button-text-color: #ffffff !important;
+  --tg-theme-header-bg-color: #ffffff !important;
+  --tg-theme-accent-text-color: #2481cc !important;
+  --tg-theme-destructive-text-color: #e53935 !important;
+  --tg-theme-section-bg-color: #ffffff !important;
+  --tg-theme-section-header-text-color: #2481cc !important;
+  --tg-theme-subtitle-text-color: #707579 !important;
+  --tg-theme-section-separator-color: rgba(15, 15, 15, 0.08) !important;
+}
+
+:root.theme-explicit[data-theme="dark"] {
+  --tg-theme-bg-color: #17212b !important;
+  --tg-theme-secondary-bg-color: #232e3c !important;
+  --tg-theme-text-color: #f5f5f5 !important;
+  --tg-theme-hint-color: #708499 !important;
+  --tg-theme-link-color: #6ab3f3 !important;
+  --tg-theme-button-color: #5288c1 !important;
+  --tg-theme-button-text-color: #ffffff !important;
+  --tg-theme-header-bg-color: #17212b !important;
+  --tg-theme-accent-text-color: #6ab3f3 !important;
+  --tg-theme-destructive-text-color: #ff453a !important;
+  --tg-theme-section-bg-color: #17212b !important;
+  --tg-theme-section-header-text-color: #6ab3f3 !important;
+  --tg-theme-subtitle-text-color: #708499 !important;
+  --tg-theme-section-separator-color: rgba(255, 255, 255, 0.08) !important;
+}
+
 @theme {
   /* Typography — Vazirmatn is the primary Persian UI typeface (see index.html).
      Latin fallbacks keep technical strings (IDs, hostnames, prices) readable. */

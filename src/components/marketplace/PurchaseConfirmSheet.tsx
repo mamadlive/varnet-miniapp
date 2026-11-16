@@ -1,9 +1,8 @@
 import { useId, useState } from 'react'
 import { Link } from 'react-router-dom'
 import type { LucideIcon } from 'lucide-react'
-import { AlertTriangle, ShieldAlert, ShieldCheck, TicketPercent, Wallet, X } from 'lucide-react'
+import { AlertTriangle, ShieldCheck, TicketPercent, Wallet, X } from 'lucide-react'
 import { BrandLogo } from '@/components/marketplace/BrandLogo'
-import { VerificationSheet } from '@/components/miniapp/VerificationSheet'
 import { Button } from '@/components/ui/Button'
 import { Input } from '@/components/ui/Input'
 import { Sheet } from '@/components/ui/Sheet'
@@ -67,9 +66,11 @@ export interface PurchaseConfirmSheetProps {
  * confirmation step.
  *
  * Responsibilities:
- * - requires phone verification before the first purchase (KYC gate),
  * - applies a discount code and recalculates the payable Toman amount,
  * - only «تایید و پرداخت» debits the wallet and records the order in D1.
+ *
+ * The signed Telegram session is the only identity proof required: there is no
+ * phone/KYC gate before payment.
  */
 export function PurchaseConfirmSheet({
   open,
@@ -85,12 +86,9 @@ export function PurchaseConfirmSheet({
   className,
 }: PurchaseConfirmSheetProps) {
   const { haptic, notify } = useTelegram()
-  const user = useAuthStore((state) => state.user)
-  const verified = user?.verified === true
   const couponInputId = useId()
 
   const [couponState, setCouponState] = useState<CouponState | null>(null)
-  const [verificationOpen, setVerificationOpen] = useState(false)
   const [submitting, setSubmitting] = useState(false)
   const [submitError, setSubmitError] = useState<{ message: string; code?: string } | null>(null)
 
@@ -141,7 +139,7 @@ export function PurchaseConfirmSheet({
   }
 
   const handleConfirm = async () => {
-    if (!target || !verified || submitting) return
+    if (!target || submitting) return
 
     setSubmitError(null)
     setSubmitting(true)
@@ -186,13 +184,11 @@ export function PurchaseConfirmSheet({
   const handleCancel = () => {
     if (submitting) return
     setSubmitError(null)
-    setVerificationOpen(false)
     onCancel()
   }
 
   return (
-    <>
-      <Sheet
+    <Sheet
         open={isOpen}
         onClose={handleCancel}
         title={fa.marketplace.purchaseConfirmTitle}
@@ -219,43 +215,25 @@ export function PurchaseConfirmSheet({
               </div>
             ) : null}
 
-            {verified ? (
-              <>
-                <Button
-                  fullWidth
-                  size="lg"
-                  loading={submitting}
-                  disabled={total <= 0}
-                  onClick={handleConfirm}
-                  leftIcon={<Wallet className="size-4" aria-hidden />}
-                >
-                  {submitting ? 'در حال پرداخت…' : fa.common.confirmAndPay}
-                </Button>
-                <Button
-                  fullWidth
-                  size="md"
-                  variant="secondary"
-                  disabled={submitting}
-                  onClick={handleCancel}
-                >
-                  {fa.common.cancel}
-                </Button>
-              </>
-            ) : (
-              <>
-                <Button
-                  fullWidth
-                  size="lg"
-                  onClick={() => setVerificationOpen(true)}
-                  leftIcon={<ShieldCheck className="size-4" aria-hidden />}
-                >
-                  تأیید هویت برای خرید
-                </Button>
-                <Button fullWidth size="md" variant="secondary" onClick={handleCancel}>
-                  {fa.common.cancel}
-                </Button>
-              </>
-            )}
+            <Button
+              fullWidth
+              size="lg"
+              loading={submitting}
+              disabled={total <= 0}
+              onClick={handleConfirm}
+              leftIcon={<Wallet className="size-4" aria-hidden />}
+            >
+              {submitting ? 'در حال پرداخت…' : fa.common.confirmAndPay}
+            </Button>
+            <Button
+              fullWidth
+              size="md"
+              variant="secondary"
+              disabled={submitting}
+              onClick={handleCancel}
+            >
+              {fa.common.cancel}
+            </Button>
           </div>
         }
       >
@@ -291,22 +269,6 @@ export function PurchaseConfirmSheet({
                 </p>
               </div>
             </div>
-
-            {!verified ? (
-              <div className="flex items-start gap-3 rounded-2xl border border-amber-500/25 bg-amber-500/10 p-3">
-                <span className="flex size-9 shrink-0 items-center justify-center rounded-xl bg-amber-500/15 text-amber-600">
-                  <ShieldAlert className="size-4" aria-hidden />
-                </span>
-                <div className="min-w-0">
-                  <p className="text-[12.5px] font-semibold text-tg-text">
-                    برای اولین خرید، احراز هویت لازم است
-                  </p>
-                  <p className="mt-0.5 text-[11.5px] leading-relaxed text-tg-hint">
-                    شماره تلفن خود را با تلگرام تأیید کنید تا پرداخت از کیف پول فعال شود.
-                  </p>
-                </div>
-              </div>
-            ) : null}
 
             <div className="space-y-1.5">
               <label
@@ -402,9 +364,6 @@ export function PurchaseConfirmSheet({
             </p>
           </div>
         ) : null}
-      </Sheet>
-
-      <VerificationSheet open={verificationOpen} onClose={() => setVerificationOpen(false)} />
-    </>
+    </Sheet>
   )
 }

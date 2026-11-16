@@ -1,6 +1,7 @@
 import { create } from 'zustand'
 import {
-  applyTheme,
+  applyAdaptiveTheme,
+  applyExplicitTheme,
   getSystemTheme,
   readStoredAdminTheme,
   readStoredMiniAppTheme,
@@ -57,14 +58,14 @@ export const useThemeStore = create<ThemeState>((set, get) => ({
 
     if (isInsideTelegram()) {
       const theme = getTelegramColorScheme()
-      applyTheme(theme)
+      applyAdaptiveTheme(theme)
       set({ theme, source: 'telegram', initialized: true })
 
       unsubscribeTelegramTheme?.()
       unsubscribeTelegramTheme = onTelegramThemeChange((scheme) => {
         // An explicit Mini App choice outlives the client's own theme switches.
         if (get().source === 'miniapp') return
-        applyTheme(scheme)
+        applyAdaptiveTheme(scheme)
         set({ theme: scheme, source: 'telegram' })
       })
       return
@@ -72,38 +73,40 @@ export const useThemeStore = create<ThemeState>((set, get) => ({
 
     const stored = readStoredAdminTheme()
     const theme = stored ?? getSystemTheme()
-    applyTheme(theme)
+    if (stored) applyExplicitTheme(stored)
+    else applyAdaptiveTheme(theme)
     set({ theme, source: stored ? 'admin' : 'system', initialized: true })
   },
 
   syncMiniApp: () => {
     const stored = readStoredMiniAppTheme()
     if (stored) {
-      applyTheme(stored)
+      applyExplicitTheme(stored)
       set({ theme: stored, source: 'miniapp' })
       return
     }
     if (isInsideTelegram()) {
       const theme = getTelegramColorScheme()
-      applyTheme(theme)
+      applyAdaptiveTheme(theme)
       set({ theme, source: 'telegram' })
       return
     }
     const theme = getSystemTheme()
-    applyTheme(theme)
+    applyAdaptiveTheme(theme)
     set({ theme, source: 'system' })
   },
 
   syncAdmin: () => {
     const stored = readStoredAdminTheme()
     const theme = stored ?? getSystemTheme()
-    applyTheme(theme)
+    if (stored) applyExplicitTheme(stored)
+    else applyAdaptiveTheme(theme)
     set({ theme, source: stored ? 'admin' : 'system' })
   },
 
   setAdminTheme: (theme) => {
     writeStoredAdminTheme(theme)
-    applyTheme(theme)
+    applyExplicitTheme(theme)
     set({ theme, source: 'admin' })
   },
 
@@ -113,7 +116,7 @@ export const useThemeStore = create<ThemeState>((set, get) => ({
 
   setMiniAppTheme: (theme) => {
     writeStoredMiniAppTheme(theme)
-    applyTheme(theme)
+    applyExplicitTheme(theme)
     set({ theme, source: 'miniapp' })
   },
 
