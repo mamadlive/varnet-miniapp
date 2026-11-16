@@ -1,5 +1,6 @@
 import type { CSSProperties } from 'react'
 import { ShoppingBag, Star } from 'lucide-react'
+import { BrandLogo } from '@/components/marketplace/BrandLogo'
 import { formatCurrency, formatNumber } from '@/lib/format'
 import { fa } from '@/lib/i18n'
 import { cn } from '@/lib/utils'
@@ -15,8 +16,8 @@ export interface FeaturedOfferCardProps {
 
 /**
  * App-store style showcase card for the «محصولات ویژه» row: a gradient hero
- * carries the product title, while the price and purchase action sit in a
- * frosted-glass tray. No emoji artwork — the typography is the visual.
+ * carries the brand's real logo (emoji fallback) beside the title, while the
+ * price and purchase action sit in a frosted-glass tray.
  */
 export function FeaturedOfferCard({
   product,
@@ -58,20 +59,30 @@ export function FeaturedOfferCard({
           ) : null}
         </div>
 
-        <h3
-          dir="auto"
-          className="relative mt-8 line-clamp-2 min-h-[2.6em] text-[21px] font-extrabold leading-[1.3] drop-shadow-sm"
-        >
-          {product.title}
-        </h3>
-        {subtitle ? (
-          <p
-            dir="auto"
-            className="relative mt-1 line-clamp-1 text-[11.5px] font-medium text-white/75"
-          >
-            {subtitle}
-          </p>
-        ) : null}
+        <div className="relative mt-3 flex items-center gap-2.5">
+          <BrandLogo
+            product={product}
+            size="lg"
+            className="border-white/35 bg-white/20 shadow-lg shadow-black/15 ring-white/30"
+            emojiClassName="text-[24px]"
+          />
+          <div className="min-w-0">
+            <h3
+              dir="auto"
+              className="line-clamp-2 min-h-[2.6em] text-[17px] font-extrabold leading-[1.3] drop-shadow-sm"
+            >
+              {product.title}
+            </h3>
+            {subtitle ? (
+              <p
+                dir="auto"
+                className="mt-0.5 line-clamp-1 text-[11px] font-medium text-white/75"
+              >
+                {subtitle}
+              </p>
+            ) : null}
+          </div>
+        </div>
 
         <div className="relative mt-3 flex items-center justify-between gap-2 rounded-2xl border border-white/25 bg-white/15 py-1.5 pe-1.5 ps-3 shadow-lg shadow-black/10 backdrop-blur-xl">
           <div className="min-w-0">

@@ -4,13 +4,14 @@ import { Bot, Clapperboard, Gamepad2, Package, Palette, Send, ShoppingBag, Star 
 import { Badge } from '@/components/ui/Badge'
 import { Button } from '@/components/ui/Button'
 import { Skeleton } from '@/components/ui/Skeleton'
+import { BrandLogo } from '@/components/marketplace/BrandLogo'
 import { formatCount, formatCurrency, formatNumber } from '@/lib/format'
 import { fa } from '@/lib/i18n'
 import { cn } from '@/lib/utils'
 import type { AccountProduct, ProductCategory } from '@/types'
 import type { PurchaseTarget } from '@/components/marketplace/types'
 
-/** Category artwork until the backend serves real product images. */
+/** Category artwork for products whose brand has no emoji/logo. */
 const CATEGORY_ICONS: Record<ProductCategory, LucideIcon> = {
   streaming: Clapperboard,
   ai: Bot,
@@ -59,15 +60,11 @@ export function AccountOfferCard({
         <span aria-hidden className="absolute -left-4 -top-6 size-20 rounded-full bg-white/20 blur-xl" />
         <span aria-hidden className="absolute -bottom-8 -right-3 size-24 rounded-full bg-black/15 blur-xl" />
 
-        <span className="relative flex size-10 shrink-0 items-center justify-center rounded-full border border-white/30 bg-tg-secondary-bg/50 shadow-sm ring-1 ring-white/20 backdrop-blur-md">
-          {product.emoji?.trim() ? (
-            <span aria-hidden className="emoji-glyph select-none text-[22px] leading-none drop-shadow">
-              {product.emoji}
-            </span>
-          ) : (
-            <Icon className="size-5 text-white" aria-hidden />
-          )}
-        </span>
+        <BrandLogo
+          product={product}
+          fallback={<Icon className="size-5 text-white" aria-hidden />}
+          className="border border-white/30 bg-tg-secondary-bg/50 shadow-sm ring-1 ring-white/20 backdrop-blur-md"
+        />
 
         {product.badge ? (
           <Badge

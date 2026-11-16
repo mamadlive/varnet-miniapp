@@ -11,6 +11,10 @@
  * Response matches the provider envelope the client already understands:
  *   { success: true, data: AccountProduct[], meta: { count, usdtRate, … } }
  *
+ * `logoUrl` is never persisted: the mapper re-derives it from the brand on every
+ * read, so the D1 schema stays unchanged and a dictionary logo update applies
+ * without a migration or re-sync.
+ *
  * Bindings: `DB` (D1). No auth — the catalogue is public, like the storefront.
  */
 

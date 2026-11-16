@@ -79,8 +79,10 @@ export interface AccountProduct {
   features?: string[]
   /** Tailwind gradient classes used by the placeholder artwork. */
   gradient?: string
-  /** Emoji used by the placeholder artwork (backend sends image URLs later). */
+  /** Emoji used as fallback artwork when no brand logo is available. */
   emoji?: string
+  /** Real brand logo resolved by the provider mapper (favicon CDN), mapped at run time. */
+  logoUrl?: string
   /** Stable brand identifier resolved by the provider mapper (`netflix`, `chatgpt`, …). */
   brandKey?: string
 }

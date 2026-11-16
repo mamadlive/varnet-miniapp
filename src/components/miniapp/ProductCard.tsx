@@ -1,4 +1,5 @@
 import { Star } from 'lucide-react'
+import { BrandLogo } from '@/components/marketplace/BrandLogo'
 import { Badge, Skeleton } from '@/components/ui'
 import { formatCount, formatCurrency, formatNumber } from '@/lib/format'
 import { fa } from '@/lib/i18n'
@@ -12,9 +13,8 @@ export interface ProductCardProps {
 }
 
 /**
- * Marketplace product tile: gradient + emoji placeholder artwork, price,
- * rating and stock. Real product images replace the gradient once the CDN is
- * available, so the artwork stays a single swappable block.
+ * Marketplace product tile: gradient artwork with the real brand logo (emoji
+ * fallback), price, rating and stock.
  */
 export function ProductCard({ product, onSelect, className }: ProductCardProps) {
   const outOfStock = product.stock <= 0
@@ -40,14 +40,10 @@ export function ProductCard({ product, onSelect, className }: ProductCardProps) 
       >
         <span aria-hidden className="absolute -left-5 -top-7 size-24 rounded-full bg-white/15 blur-xl" />
         <span aria-hidden className="absolute -bottom-9 -right-5 size-28 rounded-full bg-black/10 blur-xl" />
-        <span className="relative flex size-10 items-center justify-center rounded-full border border-white/30 bg-tg-secondary-bg/50 shadow-sm ring-1 ring-white/20 backdrop-blur-md">
-          <span
-            aria-hidden
-            className="emoji-glyph select-none text-[22px] leading-none drop-shadow"
-          >
-            {product.emoji?.trim() || '📦'}
-          </span>
-        </span>
+        <BrandLogo
+          product={product}
+          className="border border-white/30 bg-tg-secondary-bg/50 shadow-sm ring-1 ring-white/20 backdrop-blur-md"
+        />
 
         {product.badge ? (
           <Badge
