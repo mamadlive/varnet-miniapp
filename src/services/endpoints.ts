@@ -7,6 +7,13 @@
  * provider key never reaches the browser.
  */
 export const endpoints = {
+  auth: {
+    /** Exchange Telegram `initData` for a verified D1 user + session token. */
+    telegram: '/api/auth/telegram',
+    /** Resolve the current session from a Bearer token or `initData`. */
+    session: '/api/auth/session',
+  },
+
   /** Same-origin Cloudflare Pages Functions (never the RADIUS host). */
   provider: {
     products: '/api/provider/products',

@@ -9,6 +9,7 @@ import { formatCardNumber, formatCount, formatCurrency, currencyLabel } from '@/
 import { fa } from '@/lib/i18n'
 import { cn } from '@/lib/utils'
 import { useAdminStore } from '@/store/adminStore'
+import { useAuthStore } from '@/store/authStore'
 import type { Currency } from '@/types'
 
 const PRESET_AMOUNTS = [100_000, 250_000, 500_000, 1_000_000] as const
@@ -61,6 +62,7 @@ export function TopUpSheet({
   const [copiedField, setCopiedField] = useState<'card' | 'holder' | null>(null)
   const { haptic } = useTelegram()
   const bankDetails = useAdminStore((state) => state.bankDetails)
+  const isDemo = useAuthStore((state) => state.isDemo)
 
   const copyValue = async (value: string, field: 'card' | 'holder') => {
     try {
@@ -103,7 +105,7 @@ export function TopUpSheet({
   }
 
   const handleConfirm = async () => {
-    if (!valid || amount === null || busy) return
+    if (!isDemo || !valid || amount === null || busy) return
     haptic('medium')
     setSubmitting(true)
     setError(null)
@@ -131,20 +133,24 @@ export function TopUpSheet({
       description="برای خرید اکانت و پلن‌های آی‌پی ثابت، کیف پول را شارژ کنید."
       footer={
         <>
-          <Button
-            fullWidth
-            size="lg"
-            loading={busy}
-            disabled={!valid}
-            onClick={handleConfirm}
-            leftIcon={<Plus className="size-4" />}
-          >
-            {valid && amount !== null
-              ? `${fa.wallet.topUp} ${formatCurrency(amount, currency)}`
-              : fa.wallet.topUp}
-          </Button>
+          {isDemo ? (
+            <Button
+              fullWidth
+              size="lg"
+              loading={busy}
+              disabled={!valid}
+              onClick={handleConfirm}
+              leftIcon={<Plus className="size-4" />}
+            >
+              {valid && amount !== null
+                ? `${fa.wallet.topUp} ${formatCurrency(amount, currency)}`
+                : fa.wallet.topUp}
+            </Button>
+          ) : null}
           <p className="mt-2 text-center text-[11px] leading-relaxed text-tg-hint">
-            حالت نمایشی — تا وقتی داده‌های آزمایشی فعال است، پرداخت واقعی انجام نمی‌شود.
+            {isDemo
+              ? 'حالت نمایشی — تا وقتی داده‌های آزمایشی فعال است، پرداخت واقعی انجام نمی‌شود.'
+              : 'برای شارژ، مبلغ را به کارت بالا واریز کنید و تصویر رسید را از بخش پشتیبانی بفرستید. موجودی پس از تأیید ادمین اضافه می‌شود.'}
           </p>
           {error ? (
             <p className="mt-1 text-center text-[11px] font-medium text-tg-destructive">{error}</p>
@@ -248,13 +254,15 @@ export function TopUpSheet({
           </div>
         </div>
 
-        <div className="flex items-start gap-2 rounded-xl bg-tg-secondary-bg p-3 text-[12px] leading-relaxed text-tg-hint">
-          <Sparkles className="mt-0.5 size-4 shrink-0 text-brand-500" aria-hidden />
-          <p>
-            در حالت نمایشی، مبلغ فوراً به موجودی اضافه می‌شود. نسخه نهایی از تلگرام استارز، USDT
-            (TRC20) و درگاه کارت بانکی پشتیبانی می‌کند.
-          </p>
-        </div>
+        {isDemo ? (
+          <div className="flex items-start gap-2 rounded-xl bg-tg-secondary-bg p-3 text-[12px] leading-relaxed text-tg-hint">
+            <Sparkles className="mt-0.5 size-4 shrink-0 text-brand-500" aria-hidden />
+            <p>
+              در حالت نمایشی، مبلغ فوراً به موجودی اضافه می‌شود. نسخه نهایی از تلگرام استارز، USDT
+              (TRC20) و درگاه کارت بانکی پشتیبانی می‌کند.
+            </p>
+          </div>
+        ) : null}
       </div>
     </Sheet>
   )

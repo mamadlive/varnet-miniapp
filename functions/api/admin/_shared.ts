@@ -8,6 +8,12 @@
  * Files starting with `_` are not routed by Cloudflare Pages.
  */
 
+import {
+  configuredAdminIds,
+  verifyInitData,
+  type TelegramMiniAppUser,
+} from '../_lib/telegram'
+
 export interface D1Meta {
   changes?: number
 }
@@ -43,13 +49,6 @@ export interface PagesContext {
   env: AdminEnv
 }
 
-export interface TelegramMiniAppUser {
-  id: number
-  username?: string
-  first_name?: string
-  last_name?: string
-}
-
 export type AuthResult =
   | { ok: true; user: TelegramMiniAppUser }
   | { ok: false; status: number; code: string; message: string }
@@ -74,8 +73,6 @@ export const DEFAULT_MARGIN_TIERS: MarginTier[] = [
 
 export const MARGIN_TIERS_KEY = 'margin_tiers'
 
-const INIT_DATA_MAX_AGE_SECONDS = 24 * 60 * 60
-
 const RESPONSE_HEADERS = {
   'content-type': 'application/json; charset=utf-8',
   'cache-control': 'no-store',
@@ -88,84 +85,6 @@ export function jsonResponse(body: unknown, status = 200): Response {
 
 export function failure(status: number, code: string, message: string, extra?: unknown): Response {
   return jsonResponse({ success: false, code, message, ...(extra ? { data: extra } : {}) }, status)
-}
-
-function toHex(buffer: ArrayBuffer): string {
-  return Array.from(new Uint8Array(buffer))
-    .map((byte) => byte.toString(16).padStart(2, '0'))
-    .join('')
-}
-
-function timingSafeEqual(a: string, b: string): boolean {
-  if (a.length !== b.length) return false
-  let diff = 0
-  for (let i = 0; i < a.length; i += 1) diff |= a.charCodeAt(i) ^ b.charCodeAt(i)
-  return diff === 0
-}
-
-async function hmacSha256(keyBytes: BufferSource, message: string): Promise<ArrayBuffer> {
-  const key = await crypto.subtle.importKey(
-    'raw',
-    keyBytes,
-    { name: 'HMAC', hash: 'SHA-256' },
-    false,
-    ['sign'],
-  )
-  return crypto.subtle.sign('HMAC', key, new TextEncoder().encode(message))
-}
-
-async function verifyInitData(
-  initData: string,
-  botToken: string,
-): Promise<TelegramMiniAppUser | null> {
-  const params = new URLSearchParams(initData)
-  const hash = params.get('hash')
-  if (!hash) return null
-  params.delete('hash')
-
-  const dataCheckString = [...params.entries()]
-    .sort(([left], [right]) => left.localeCompare(right))
-    .map(([key, value]) => `${key}=${value}`)
-    .join('\n')
-
-  const secretKey = await hmacSha256(new TextEncoder().encode('WebAppData'), botToken)
-  const signature = toHex(await hmacSha256(secretKey, dataCheckString))
-  if (!timingSafeEqual(signature, hash.toLowerCase())) return null
-
-  const authDate = Number(params.get('auth_date'))
-  if (!Number.isFinite(authDate) || authDate <= 0) return null
-  if (Date.now() / 1000 - authDate > INIT_DATA_MAX_AGE_SECONDS) return null
-
-  const rawUser = params.get('user')
-  if (!rawUser) return null
-
-  try {
-    const parsed = JSON.parse(rawUser) as {
-      id?: unknown
-      username?: unknown
-      first_name?: unknown
-      last_name?: unknown
-    }
-    const id = Number(parsed.id)
-    if (!Number.isInteger(id) || id <= 0) return null
-    return {
-      id,
-      username: typeof parsed.username === 'string' ? parsed.username : undefined,
-      first_name: typeof parsed.first_name === 'string' ? parsed.first_name : undefined,
-      last_name: typeof parsed.last_name === 'string' ? parsed.last_name : undefined,
-    }
-  } catch {
-    return null
-  }
-}
-
-function configuredAdminIds(env: AdminEnv): Set<number> {
-  return new Set(
-    (env.ADMIN_TELEGRAM_IDS ?? '')
-      .split(/[\s,]+/)
-      .map((value) => Number(value))
-      .filter((value) => Number.isInteger(value) && value > 0),
-  )
 }
 
 async function hasAdminRole(db: D1Database, telegramId: number): Promise<boolean> {

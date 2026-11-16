@@ -13,9 +13,9 @@ initTelegram()
 // 2. Adopt the Telegram colorScheme, or the admin/system preference in a browser.
 useThemeStore.getState().initTheme()
 
-// 3. Seed the session: real Telegram user inside the client, demo user in a
-//    browser preview (VITE_DEMO_MODE=true).
-useAuthStore.getState().hydrateSession()
+// 3. Resolve the session: real Telegram user via POST /api/auth/telegram,
+//    limited demo user only in a browser preview (VITE_DEMO_MODE=true).
+void useAuthStore.getState().hydrateSession()
 
 const container = document.getElementById('root')
 if (!container) {

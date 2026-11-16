@@ -10,6 +10,7 @@ import { WalletStats } from '@/components/wallet/WalletStats'
 import { useTelegram } from '@/hooks/useTelegram'
 import { formatCount } from '@/lib/format'
 import { fa } from '@/lib/i18n'
+import { useAuthStore } from '@/store/authStore'
 import { useWalletStore } from '@/store/walletStore'
 import type { TransactionType } from '@/types'
 
@@ -40,6 +41,7 @@ export default function WalletPage() {
   const loadWallet = useWalletStore((state) => state.loadWallet)
   const loadTransactions = useWalletStore((state) => state.loadTransactions)
   const topUp = useWalletStore((state) => state.topUp)
+  const isDemo = useAuthStore((state) => state.isDemo)
 
   const { haptic, notify } = useTelegram()
 
@@ -91,10 +93,12 @@ export default function WalletPage() {
 
       <WalletStats pending={pending} lifetimeSpent={lifetimeSpent} currency={currency} />
 
-      <p className="flex items-start gap-2 px-1 text-[11.5px] leading-relaxed text-tg-hint">
-        <Info className="mt-0.5 size-3.5 shrink-0 text-brand-500" aria-hidden />
-        حالت نمایشی فعال است — افزایش موجودی شبیه‌سازی‌شده است و پرداخت واقعی انجام نمی‌شود.
-      </p>
+      {isDemo ? (
+        <p className="flex items-start gap-2 px-1 text-[11.5px] leading-relaxed text-tg-hint">
+          <Info className="mt-0.5 size-3.5 shrink-0 text-brand-500" aria-hidden />
+          حالت نمایشی فعال است — افزایش موجودی شبیه‌سازی‌شده است و پرداخت واقعی انجام نمی‌شود.
+        </p>
+      ) : null}
 
       <section>
         <div className="mb-2 flex items-center justify-between px-1">

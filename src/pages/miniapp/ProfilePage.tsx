@@ -5,6 +5,7 @@ import {
   ChevronLeft,
   Info,
   Languages,
+  LayoutDashboard,
   LifeBuoy,
   Moon,
   ReceiptText,
@@ -107,8 +108,8 @@ function AboutPanel() {
       </div>
       <p className="text-[12.5px] leading-relaxed text-tg-hint">
         یک مینی‌اپ تلگرام برای خرید اکانت‌های دیجیتال و اجاره آی‌پی ثابت، همراه با پنل مدیریت
-        دسکتاپ برای عملیات. این نسخه تا اتصال بک‌اند FastAPI روی داده‌های آزمایشی محلی اجرا
-        می‌شود.
+        دسکتاپ برای عملیات. حساب کاربری از طریق تلگرام تأیید و در پایگاه‌داده D1 ذخیره می‌شود؛
+        پیش‌نمایش مرورگر خارج از تلگرام محدود و نمایشی است.
       </p>
     </div>
   )
@@ -258,6 +259,25 @@ export default function ProfilePage() {
           <MenuRow icon={Wallet} label="کیف پول" to="/app/wallet" onClick={() => haptic()} />
         </Card>
       </div>
+
+      {isAdmin ? (
+        <div>
+          <p className="tg-section-title">مدیریت</p>
+          <Card
+            variant="surface"
+            padded={false}
+            className="divide-y divide-tg-separator overflow-hidden"
+          >
+            <MenuRow
+              icon={LayoutDashboard}
+              label="پنل مدیریت"
+              hint="دسترسی مدیر"
+              to="/admin"
+              onClick={() => haptic()}
+            />
+          </Card>
+        </div>
+      ) : null}
 
       <div>
         <p className="tg-section-title">بیشتر</p>

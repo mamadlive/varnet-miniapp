@@ -1,17 +1,41 @@
-import WebApp from '@twa-dev/sdk'
 import type { TelegramUser } from '@/types'
 
 /**
- * Defensive wrapper around `@twa-dev/sdk`.
+ * Defensive wrapper around `window.Telegram.WebApp`.
  *
- * Why the defensive calls? `@twa-dev/sdk` binds to `window.Telegram.WebApp`
- * at import time (the official `telegram-web-app.js` script provides it), but
- * in a plain desktop browser — or if the Telegram script cannot be reached —
- * the object is a partial shim. Every method call therefore goes through
- * `invoke()` so the UI never crashes outside Telegram.
+ * The official `telegram-web-app.js` (loaded in `index.html`) defines the
+ * object before the bundle runs; outside Telegram a minimal shim does. We read
+ * it straight from `window` instead of importing `@twa-dev/sdk`, because the
+ * SDK's CJS default export arrives wrapped (`{ default: WebApp }`) under
+ * Vite's dev interop — leaving `initData` undefined and silently forcing the
+ * demo session. Every method call goes through `invoke()` so the UI never
+ * crashes on older clients or the browser shim.
  */
 
 type UnknownRecord = Record<string, unknown>
+
+interface TelegramWebAppUser {
+  id: number
+  first_name?: string
+  last_name?: string
+  username?: string
+  language_code?: string
+  is_premium?: boolean
+  photo_url?: string
+}
+
+export interface TelegramWebAppLike {
+  initData: string
+  initDataUnsafe?: { user?: TelegramWebAppUser }
+  colorScheme?: string
+  [key: string]: unknown
+}
+
+function resolveWebApp(): TelegramWebAppLike | null {
+  if (typeof window === 'undefined') return null
+  const telegram = (window as unknown as { Telegram?: { WebApp?: unknown } }).Telegram
+  return (telegram?.WebApp as TelegramWebAppLike | undefined) ?? null
+}
 
 function invoke(target: unknown, method: string, ...args: unknown[]): void {
   const candidate = (target as UnknownRecord | null | undefined)?.[method]
@@ -24,8 +48,8 @@ function invoke(target: unknown, method: string, ...args: unknown[]): void {
   }
 }
 
-/** The SDK instance (also available as `window.Telegram.WebApp`). */
-export const webApp = WebApp
+/** The live Telegram WebApp object (`null` outside a browser). */
+export const webApp = resolveWebApp()
 
 /** Is the Telegram Web App script present at all? */
 export function isTelegramWebApp(): boolean {

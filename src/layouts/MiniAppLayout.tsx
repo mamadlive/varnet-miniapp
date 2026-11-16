@@ -7,6 +7,7 @@ import { env } from '@/config/env'
 import { useTelegram } from '@/hooks/useTelegram'
 import { fa } from '@/lib/i18n'
 import { cn } from '@/lib/utils'
+import { useAuthStore } from '@/store/authStore'
 import { useThemeStore } from '@/store/themeStore'
 
 interface Tab {
@@ -35,7 +36,7 @@ export default function MiniAppLayout() {
   const syncMiniAppTheme = useThemeStore((state) => state.syncMiniApp)
   const theme = useThemeStore((state) => state.theme)
   const toggleMiniAppTheme = useThemeStore((state) => state.toggleMiniAppTheme)
-  const showDemoChip = env.demoMode && !isTelegram
+  const showDemoChip = useAuthStore((state) => state.isDemo)
   const isDark = theme === 'dark'
 
   // An explicit Mini App choice wins; otherwise the Telegram client palette is

@@ -2,6 +2,7 @@ import { lazy, Suspense } from 'react'
 import { BrowserRouter, Navigate, Route, Routes } from 'react-router-dom'
 
 import { AppErrorBoundary } from '@/components/shared/AppErrorBoundary'
+import { AuthGate } from '@/components/shared/AuthGate'
 import { ScrollToTop } from '@/components/shared/ScrollToTop'
 import { Spinner } from '@/components/ui/Spinner'
 import MiniAppLayout from '@/layouts/MiniAppLayout'
@@ -50,8 +51,9 @@ export default function App() {
     <AppErrorBoundary>
       <BrowserRouter>
         <ScrollToTop />
-        <Suspense fallback={<RouteFallback />}>
-          <Routes>
+        <AuthGate>
+          <Suspense fallback={<RouteFallback />}>
+            <Routes>
             {/* ---------------------------------------------------------- */}
             {/* Telegram Mini App (customer facing, mobile first)           */}
             {/* ---------------------------------------------------------- */}
@@ -94,7 +96,8 @@ export default function App() {
             <Route path="/" element={<Navigate to="/app" replace />} />
             <Route path="*" element={<NotFoundPage />} />
           </Routes>
-        </Suspense>
+          </Suspense>
+        </AuthGate>
       </BrowserRouter>
     </AppErrorBoundary>
   )
