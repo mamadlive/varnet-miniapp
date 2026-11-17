@@ -227,6 +227,7 @@ export async function onRequestGet(context: PagesContext): Promise<Response> {
 
   let balance: number
   let lifetimeSpent: number
+  let pendingReceipts = 0
   let rows: TransactionRow[]
   try {
     const user = await db
@@ -244,6 +245,19 @@ export async function onRequestGet(context: PagesContext): Promise<Response> {
       .bind(userId)
       .first<{ spent: number }>()
     lifetimeSpent = Number(spent?.spent ?? 0)
+
+    try {
+      const pendingRow = await db
+        .prepare(
+          `SELECT COALESCE(SUM(amount), 0) AS pending FROM payment_receipts
+           WHERE user_id = ? AND purpose = 'wallet_topup' AND status = 'PENDING'`,
+        )
+        .bind(userId)
+        .first<{ pending: number }>()
+      pendingReceipts = Number(pendingRow?.pending ?? 0)
+    } catch {
+      pendingReceipts = 0
+    }
 
     const result = await db
       .prepare(
@@ -265,7 +279,7 @@ export async function onRequestGet(context: PagesContext): Promise<Response> {
     data: {
       balance,
       currency: 'IRT',
-      pending: 0,
+      pending: pendingReceipts,
       lifetimeSpent,
       transactions: rows.map((row) => ({
         id: row.id,

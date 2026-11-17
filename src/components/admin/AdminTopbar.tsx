@@ -11,6 +11,7 @@ const SECTION_TITLES: Array<{ path: string; title: string }> = [
   { path: '/admin/products', title: 'محصولات اکانت' },
   { path: '/admin/vpn-servers', title: 'نودهای آی‌پی ثابت' },
   { path: '/admin/orders', title: 'سفارش‌ها' },
+  { path: '/admin/receipts', title: 'تایید واریزی‌های کارت به کارت' },
   { path: '/admin/coupons', title: 'کدهای تخفیف' },
   { path: '/admin/tickets', title: 'تیکت‌های پشتیبانی' },
   { path: '/admin/broadcast', title: 'پیام انبوه' },

@@ -145,6 +145,15 @@ export function OrderDetailsSheet({ order, open, onClose }: OrderDetailsSheetPro
             </div>
           </section>
 
+          {order.deliveryNote ? (
+            <section>
+              <p className="tg-section-title">اطلاعات تحویل</p>
+              <pre className="whitespace-pre-wrap break-words rounded-xl border border-emerald-500/25 bg-emerald-500/10 p-3 text-[12px] leading-relaxed text-tg-text">
+                <bdi>{order.deliveryNote}</bdi>
+              </pre>
+            </section>
+          ) : null}
+
           {vpnDelivered ? (
             <section>
               <OpenVpnNotice />
@@ -159,6 +168,10 @@ export function OrderDetailsSheet({ order, open, onClose }: OrderDetailsSheetPro
             <p className="tg-section-title">خلاصه</p>
             <div className="space-y-2 rounded-xl border border-tg-separator bg-tg-bg p-3">
               <SummaryRow label="جمع جزء" value={formatCurrency(subtotal, order.currency)} />
+              <SummaryRow
+                label="روش پرداخت"
+                value={order.paymentMethod === 'card' ? 'کارت به کارت' : 'کیف پول'}
+              />
               <SummaryRow label="تحویل" value="رایگان" />
               <div className="border-t border-tg-separator pt-2">
                 <SummaryRow

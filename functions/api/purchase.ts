@@ -72,6 +72,8 @@ interface PurchaseBody {
   total?: unknown
   currency?: unknown
   couponCode?: unknown
+  paymentMethod?: unknown
+  receiptReference?: unknown
 }
 
 const MAX_BODY_BYTES = 8_192
@@ -252,6 +254,8 @@ interface ValidatedPurchase {
   discount: number
   total: number
   couponCode?: string
+  paymentMethod: 'wallet' | 'card'
+  receiptReference?: string
 }
 
 function readString(value: unknown, maxLength: number): string | null {
@@ -298,7 +302,20 @@ function validateBody(body: PurchaseBody): { ok: true; value: ValidatedPurchase 
     couponCode = parsedCoupon
   }
 
-  return { ok: true, value: { productId, title, kind, subtotal, discount, total, couponCode } }
+  const paymentMethod = body.paymentMethod === 'card' ? 'card' : 'wallet'
+  let receiptReference: string | undefined
+  if (paymentMethod === 'card') {
+    const reference = readString(body.receiptReference, 64)
+    if (!reference || reference.length < 4) {
+      return { ok: false, message: 'شماره پیگیری واریز را کامل وارد کنید.' }
+    }
+    receiptReference = reference
+  }
+
+  return {
+    ok: true,
+    value: { productId, title, kind, subtotal, discount, total, couponCode, paymentMethod, receiptReference },
+  }
 }
 
 /* -------------------------------------------------------------------------- */
@@ -339,7 +356,17 @@ export async function onRequestPost(context: PagesContext): Promise<Response> {
 
   const validated = validateBody(body)
   if (!validated.ok) return failure(400, 'PURCHASE_VALIDATION', validated.message)
-  const { productId, title, kind, subtotal, discount, total, couponCode } = validated.value
+  const {
+    productId,
+    title,
+    kind,
+    subtotal,
+    discount,
+    total,
+    couponCode,
+    paymentMethod,
+    receiptReference,
+  } = validated.value
 
   const now = new Date().toISOString()
   const userId = userIdFor(auth.user)
@@ -353,6 +380,68 @@ export async function onRequestPost(context: PagesContext): Promise<Response> {
   const balance = await readBalance(db, userId)
   if (balance === null) {
     return failure(500, 'USER_NOT_FOUND', 'حساب کیف پول پیدا نشد. دوباره تلاش کنید.')
+  }
+
+  if (paymentMethod === 'card') {
+    // Card-to-card: nothing is debited yet. The order waits as `pending`
+    // until an admin approves the matching `payment_receipts` row.
+    const orderId = `ord_${crypto.randomUUID()}`
+    const receiptId = `rcp_${crypto.randomUUID()}`
+
+    try {
+      await db.batch([
+        db
+          .prepare(
+            `INSERT INTO orders
+               (id, user_id, product_id, product_title, kind, quantity, subtotal, discount, total, currency, coupon_code, status, payment_method, created_at, updated_at)
+             VALUES (?, ?, ?, ?, ?, 1, ?, ?, ?, 'IRT', ?, 'pending', 'card', ?, ?)`,
+          )
+          .bind(
+            orderId,
+            userId,
+            productId,
+            title,
+            kind,
+            subtotal,
+            discount,
+            total,
+            couponCode ?? null,
+            now,
+            now,
+          ),
+        db
+          .prepare(
+            `INSERT INTO payment_receipts
+               (id, user_id, telegram_id, purpose, order_id, amount, currency, reference, status, created_at)
+             VALUES (?, ?, ?, 'product_purchase', ?, ?, 'IRT', ?, 'PENDING', ?)`,
+          )
+          .bind(receiptId, userId, auth.user.id, orderId, total, receiptReference ?? '', now),
+      ])
+    } catch {
+      return failure(500, 'ORDER_WRITE_FAILED', 'ثبت سفارش کارت به کارت انجام نشد. دوباره تلاش کنید.')
+    }
+
+    return jsonResponse({
+      success: true,
+      message: 'سفارش ثبت شد و پس از تایید فیش واریز توسط ادمین تکمیل می‌شود.',
+      data: {
+        order: {
+          id: orderId,
+          status: 'pending',
+          kind,
+          productId,
+          title,
+          subtotal,
+          discount,
+          total,
+          currency: 'IRT',
+          paymentMethod: 'card',
+          createdAt: now,
+        },
+        balance,
+        receipt: { id: receiptId, status: 'PENDING' },
+      },
+    })
   }
 
   if (balance < total) {
@@ -391,8 +480,8 @@ export async function onRequestPost(context: PagesContext): Promise<Response> {
       db
         .prepare(
           `INSERT INTO orders
-             (id, user_id, product_id, product_title, kind, quantity, subtotal, discount, total, currency, coupon_code, status, created_at)
-           VALUES (?, ?, ?, ?, ?, 1, ?, ?, ?, 'IRT', ?, 'paid', ?)`,
+             (id, user_id, product_id, product_title, kind, quantity, subtotal, discount, total, currency, coupon_code, status, payment_method, created_at, updated_at)
+           VALUES (?, ?, ?, ?, ?, 1, ?, ?, ?, 'IRT', ?, 'paid', 'wallet', ?, ?)`,
         )
         .bind(
           orderId,
@@ -404,6 +493,7 @@ export async function onRequestPost(context: PagesContext): Promise<Response> {
           discount,
           total,
           couponCode ?? null,
+          now,
           now,
         ),
       db

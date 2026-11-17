@@ -23,12 +23,25 @@ export const endpoints = {
     catalogue: '/api/products',
   },
 
+  /** Customer-side order history (real D1 rows). */
+  orders: '/api/orders',
+  /** Public card-to-card destination configured by the admin. */
+  bank: '/api/bank',
+
   admin: {
     users: '/api/admin/users',
     /** Manual wallet top-up / deduction (admin only). */
     walletAdjust: '/api/admin/wallet/adjust',
     /** Read/save the automatic margin ladder (admin only). */
     margins: '/api/admin/settings/margins',
+    /** All D1 orders plus complete/refund actions. */
+    orders: '/api/admin/orders',
+    orderAction: '/api/admin/orders/action',
+    /** Card-to-card claims awaiting review. */
+    receipts: '/api/admin/receipts',
+    receiptAction: '/api/admin/receipts/action',
+    /** Card destination persisted in D1 `settings`. */
+    bank: '/api/admin/settings/bank',
   },
 
   vpn: {

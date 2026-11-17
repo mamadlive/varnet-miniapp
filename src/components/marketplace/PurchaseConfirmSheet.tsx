@@ -1,22 +1,31 @@
-import { useId, useState } from 'react'
+import { useEffect, useId, useState } from 'react'
 import { Link } from 'react-router-dom'
 import type { LucideIcon } from 'lucide-react'
-import { AlertTriangle, ShieldCheck, TicketPercent, Wallet, X } from 'lucide-react'
+import {
+  AlertTriangle,
+  CreditCard,
+  Landmark,
+  ShieldCheck,
+  TicketPercent,
+  Wallet,
+  X,
+} from 'lucide-react'
 import { BrandLogo } from '@/components/marketplace/BrandLogo'
 import { Button } from '@/components/ui/Button'
 import { Input } from '@/components/ui/Input'
 import { Sheet } from '@/components/ui/Sheet'
 import { useTelegram } from '@/hooks/useTelegram'
-import { formatCurrency } from '@/lib/format'
+import { formatCardNumber, formatCurrency } from '@/lib/format'
 import { fa } from '@/lib/i18n'
 import { cn } from '@/lib/utils'
 import { isApiError } from '@/services/apiClient'
 import { validateCoupon } from '@/services/coupons.service'
 import type { CouponValidation } from '@/services/coupons.service'
+import { fetchBankDetails } from '@/services/payments.service'
 import { purchaseProduct } from '@/services/purchase.service'
 import { useAuthStore } from '@/store/authStore'
 import { useWalletStore } from '@/store/walletStore'
-import type { AccountProduct, Currency, OrderKind } from '@/types'
+import type { AccountProduct, BankAccountDetails, Currency, OrderKind, PaymentMethod } from '@/types'
 import type { PurchaseSummary, PurchaseTarget } from '@/components/marketplace/types'
 
 /** Artwork source for the summary tile (account products). */
@@ -91,8 +100,46 @@ export function PurchaseConfirmSheet({
   const [couponState, setCouponState] = useState<CouponState | null>(null)
   const [submitting, setSubmitting] = useState(false)
   const [submitError, setSubmitError] = useState<{ message: string; code?: string } | null>(null)
+  const [method, setMethod] = useState<PaymentMethod>('wallet')
+  const [reference, setReference] = useState('')
+  const [bank, setBank] = useState<BankAccountDetails | null>(null)
+  const [bankLoading, setBankLoading] = useState(false)
+  const [bankError, setBankError] = useState<string | null>(null)
 
   const isOpen = open && target !== null
+
+  useEffect(() => {
+    if (!isOpen) return
+    setMethod('wallet')
+    setReference('')
+    setSubmitError(null)
+  }, [isOpen, target?.id])
+
+  useEffect(() => {
+    if (!isOpen || method !== 'card') return
+    let cancelled = false
+    setBankLoading(true)
+    setBankError(null)
+    fetchBankDetails()
+      .then((details) => {
+        if (cancelled) return
+        setBank(details)
+        if (!details.cardNumber || !details.accountHolder) {
+          setBankError('اطلاعات کارت هنوز توسط پشتیبانی تنظیم نشده است.')
+        }
+      })
+      .catch((cause: unknown) => {
+        if (!cancelled) {
+          setBankError(cause instanceof Error ? cause.message : 'دریافت اطلاعات کارت انجام نشد.')
+        }
+      })
+      .finally(() => {
+        if (!cancelled) setBankLoading(false)
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [isOpen, method])
   const coupon =
     target && couponState?.productId === target.id ? couponState : { productId: '', ...EMPTY_COUPON }
 
@@ -141,6 +188,17 @@ export function PurchaseConfirmSheet({
   const handleConfirm = async () => {
     if (!target || submitting) return
 
+    const trimmedReference = reference.trim()
+    if (method === 'card' && trimmedReference.length < 4) {
+      setSubmitError({ message: 'شماره پیگیری واریز را کامل وارد کنید.' })
+      haptic('heavy')
+      return
+    }
+    if (method === 'card' && bankError) {
+      setSubmitError({ message: bankError })
+      return
+    }
+
     setSubmitError(null)
     setSubmitting(true)
 
@@ -154,11 +212,15 @@ export function PurchaseConfirmSheet({
         total,
         currency,
         couponCode: coupon.applied?.coupon.code,
+        paymentMethod: method,
+        receiptReference: method === 'card' ? trimmedReference : undefined,
       })
 
-      // D1 is the source of truth for the wallet — mirror the post-debit balance.
-      useWalletStore.getState().setBalance(receipt.balance)
-      useAuthStore.getState().setWalletBalance(receipt.balance)
+      if (method === 'wallet') {
+        // D1 is the source of truth for the wallet — mirror the post-debit balance.
+        useWalletStore.getState().setBalance(receipt.balance)
+        useAuthStore.getState().setWalletBalance(receipt.balance)
+      }
 
       haptic('medium')
       notify('success')
@@ -168,6 +230,8 @@ export function PurchaseConfirmSheet({
         total,
         currency,
         coupon: coupon.applied?.coupon,
+        paymentMethod: method,
+        pending: method === 'card',
       })
     } catch (cause) {
       setSubmitError({
@@ -219,11 +283,21 @@ export function PurchaseConfirmSheet({
               fullWidth
               size="lg"
               loading={submitting}
-              disabled={total <= 0}
+              disabled={total <= 0 || (method === 'card' && bankError !== null)}
               onClick={handleConfirm}
-              leftIcon={<Wallet className="size-4" aria-hidden />}
+              leftIcon={
+                method === 'card' ? (
+                  <CreditCard className="size-4" aria-hidden />
+                ) : (
+                  <Wallet className="size-4" aria-hidden />
+                )
+              }
             >
-              {submitting ? 'در حال پرداخت…' : fa.common.confirmAndPay}
+              {submitting
+                ? 'در حال ثبت…'
+                : method === 'card'
+                  ? 'ثبت سفارش و ارسال فیش'
+                  : fa.common.confirmAndPay}
             </Button>
             <Button
               fullWidth
@@ -324,6 +398,120 @@ export function PurchaseConfirmSheet({
                 </p>
               ) : null}
             </div>
+
+            <div className="space-y-2">
+              <p className="text-[13px] font-medium text-tg-hint">روش پرداخت</p>
+              <div className="grid gap-2">
+                <button
+                  type="button"
+                  aria-pressed={method === 'wallet'}
+                  onClick={() => {
+                    if (method === 'wallet') return
+                    haptic('light')
+                    setMethod('wallet')
+                    setSubmitError(null)
+                  }}
+                  className={cn(
+                    'flex items-center gap-3 rounded-2xl border p-3 text-start transition-colors',
+                    method === 'wallet'
+                      ? 'border-brand-500 bg-brand-500/10'
+                      : 'border-tg-separator bg-tg-bg hover:bg-tg-secondary-bg',
+                  )}
+                >
+                  <Wallet
+                    className={cn('size-5 shrink-0', method === 'wallet' ? 'text-brand-600' : 'text-tg-hint')}
+                    aria-hidden
+                  />
+                  <span className="min-w-0 flex-1">
+                    <span className="block text-[13px] font-semibold text-tg-text">پرداخت آنی از کیف پول</span>
+                    <span className="block text-[11px] text-tg-hint">کسر مستقیم مبلغ از موجودی کیف پول</span>
+                  </span>
+                </button>
+
+                <button
+                  type="button"
+                  aria-pressed={method === 'card'}
+                  onClick={() => {
+                    if (method === 'card') return
+                    haptic('light')
+                    setMethod('card')
+                    setSubmitError(null)
+                  }}
+                  className={cn(
+                    'flex items-center gap-3 rounded-2xl border p-3 text-start transition-colors',
+                    method === 'card'
+                      ? 'border-brand-500 bg-brand-500/10'
+                      : 'border-tg-separator bg-tg-bg hover:bg-tg-secondary-bg',
+                  )}
+                >
+                  <CreditCard
+                    className={cn('size-5 shrink-0', method === 'card' ? 'text-brand-600' : 'text-tg-hint')}
+                    aria-hidden
+                  />
+                  <span className="min-w-0 flex-1">
+                    <span className="block text-[13px] font-semibold text-tg-text">کارت به کارت</span>
+                    <span className="block text-[11px] text-tg-hint">واریز به کارت و ثبت شماره پیگیری</span>
+                  </span>
+                </button>
+
+                <div className="flex items-center gap-3 rounded-2xl border border-dashed border-tg-separator bg-tg-secondary-bg/40 p-3 opacity-60">
+                  <Landmark className="size-5 shrink-0 text-tg-hint" aria-hidden />
+                  <span className="min-w-0 flex-1">
+                    <span className="block text-[13px] font-semibold text-tg-text">
+                      درگاه پرداخت آنلاین <span className="text-[10.5px] font-medium text-tg-hint">(به زودی)</span>
+                    </span>
+                    <span className="block text-[11px] text-tg-hint">پرداخت خودکار با کارت بانکی</span>
+                  </span>
+                  <span className="shrink-0 rounded-md bg-tg-secondary-bg px-2 py-0.5 text-[10px] text-tg-hint">
+                    غیرفعال
+                  </span>
+                </div>
+              </div>
+            </div>
+
+            {method === 'card' ? (
+              <div className="space-y-2.5 rounded-2xl border border-dashed border-brand-500/40 bg-brand-500/[0.06] p-3.5">
+                <p className="text-[12.5px] font-semibold text-tg-text">کارت مقصد واریز</p>
+                {bankLoading ? (
+                  <p className="text-[11.5px] text-tg-hint">در حال دریافت اطلاعات کارت…</p>
+                ) : bankError ? (
+                  <p className="text-[11.5px] font-medium text-tg-destructive">{bankError}</p>
+                ) : bank ? (
+                  <div className="space-y-1.5">
+                    <div className="flex items-center justify-between gap-2 rounded-xl bg-tg-bg px-3 py-2">
+                      <span className="text-[10.5px] text-tg-hint">شماره کارت</span>
+                      <span dir="ltr" className="bidi-ltr text-[13px] font-semibold tabular-nums text-tg-text">
+                        {formatCardNumber(bank.cardNumber)}
+                      </span>
+                    </div>
+                    <div className="flex items-center justify-between gap-2 rounded-xl bg-tg-bg px-3 py-2">
+                      <span className="text-[10.5px] text-tg-hint">نام صاحب حساب</span>
+                      <span className="text-[13px] font-semibold text-tg-text">{bank.accountHolder}</span>
+                    </div>
+                    {bank.bankName ? (
+                      <p className="px-1 text-[11px] text-tg-hint">بانک: {bank.bankName}</p>
+                    ) : null}
+                  </div>
+                ) : null}
+
+                <Input
+                  value={reference}
+                  onChange={(event) => {
+                    setReference(event.target.value)
+                    setSubmitError(null)
+                  }}
+                  label="شماره پیگیری / کد رهگیری واریز"
+                  placeholder="مثلاً 123456789"
+                  className="bidi-ltr text-[13px]"
+                  autoComplete="off"
+                  spellCheck={false}
+                />
+                <p className="text-[11px] leading-relaxed text-tg-hint">
+                  ابتدا مبلغ <bdi>{totalLabel}</bdi> را به کارت بالا واریز کنید، سپس شماره پیگیری را
+                  ثبت کنید. سفارش پس از تایید فیش توسط ادمین تکمیل می‌شود.
+                </p>
+              </div>
+            ) : null}
 
             <div className="space-y-2 rounded-2xl border border-tg-separator bg-tg-bg p-3 text-[12.5px]">
               <div className="flex items-center justify-between gap-3">

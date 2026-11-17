@@ -2,7 +2,7 @@ import axios from 'axios'
 import { env } from '@/config/env'
 import { ApiError, normalizeApiError } from '@/services/apiClient'
 import { getTelegramInitData } from '@/services/telegram'
-import type { Currency, OrderKind } from '@/types'
+import type { Currency, OrderKind, OrderStatus, PaymentMethod } from '@/types'
 
 /**
  * Wallet purchases go through the same-origin Pages Function
@@ -21,11 +21,15 @@ export interface PurchaseInput {
   total: number
   currency: Currency
   couponCode?: string
+  /** `wallet` debits instantly; `card` creates a pending order + receipt. */
+  paymentMethod?: PaymentMethod
+  /** Card-to-card tracking number supplied by the customer. */
+  receiptReference?: string
 }
 
 export interface PurchaseOrder {
   id: string
-  status: 'paid'
+  status: OrderStatus
   kind: OrderKind
   productId: string
   title: string
@@ -33,13 +37,15 @@ export interface PurchaseOrder {
   discount: number
   total: number
   currency: Currency
+  paymentMethod?: PaymentMethod
   createdAt: string
 }
 
 export interface PurchaseReceipt {
   order: PurchaseOrder
-  /** Wallet balance after the debit, straight from D1. */
+  /** Wallet balance after the request, straight from D1. */
   balance: number
+  receipt?: { id: string; status: 'PENDING' }
 }
 
 interface PurchaseEnvelope {
@@ -49,6 +55,7 @@ interface PurchaseEnvelope {
   data?: {
     order?: PurchaseOrder
     balance?: number
+    receipt?: { id: string; status: 'PENDING' }
   }
 }
 
@@ -71,6 +78,7 @@ export async function purchaseProduct(input: PurchaseInput): Promise<PurchaseRec
     return {
       order: data.data.order,
       balance: Number(data.data.balance ?? 0),
+      receipt: data.data.receipt,
     }
   } catch (error) {
     throw normalizeApiError(error)

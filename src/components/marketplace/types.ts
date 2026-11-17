@@ -1,6 +1,6 @@
 /** Shared types for the `/app` marketplace surface. */
 
-import type { Coupon, Currency } from '@/types'
+import type { Coupon, Currency, PaymentMethod } from '@/types'
 
 export type MarketplaceTab = 'accounts' | 'vpn'
 
@@ -17,4 +17,7 @@ export interface PurchaseSummary {
   total: number
   currency: Currency
   coupon?: Coupon
+  paymentMethod?: PaymentMethod
+  /** Card-to-card orders stay pending until the admin approves the receipt. */
+  pending?: boolean
 }

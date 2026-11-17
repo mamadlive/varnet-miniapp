@@ -3,14 +3,18 @@ import type { AutoMarginTier } from '@/lib/pricing'
 import { ApiError, apiGetProxy, apiPostProxy } from '@/services/apiClient'
 import { getAdminSessionToken } from '@/services/adminAuth.service'
 import { endpoints } from '@/services/endpoints'
-import {
-  mockAdminStats,
-  mockOrders,
-  mockRevenueSeries,
-  mockVpnServers,
-} from '@/services/mocks'
+import { mockAdminStats, mockRevenueSeries, mockVpnServers } from '@/services/mocks'
 import { getTelegramInitData } from '@/services/telegram'
-import type { AdminStats, Order, RevenuePoint, User, VpnServer } from '@/types'
+import type {
+  AdminStats,
+  BankAccountDetails,
+  Order,
+  PaymentReceipt,
+  PaymentReceiptStatus,
+  RevenuePoint,
+  User,
+  VpnServer,
+} from '@/types'
 
 /**
  * Admin panel data.
@@ -119,8 +123,89 @@ export async function saveMarginTiers(tiers: AutoMarginTier[]): Promise<AutoMarg
 }
 
 export async function listAdminOrders(): Promise<Order[]> {
-  await sleep(240)
-  return mockOrders
+  const orders = await adminGet<Order[]>(endpoints.admin.orders)
+  if (!Array.isArray(orders)) throw new ApiError('فهرست سفارش‌های دریافتی نامعتبر بود.')
+  return orders
+}
+
+export type OrderAction = 'complete' | 'reject'
+
+export interface OrderActionResult {
+  orderId: string
+  status: string
+  refunded?: number
+  balance?: number | null
+  updatedAt?: string
+}
+
+export async function actOnOrder(
+  orderId: string,
+  action: OrderAction,
+  deliveryNote?: string,
+): Promise<OrderActionResult> {
+  const payload = await apiPostProxy<AdminEnvelope<OrderActionResult>>(
+    endpoints.admin.orderAction,
+    { orderId, action, deliveryNote },
+    { headers: adminHeaders() },
+  )
+  if (!payload || payload.success !== true || !payload.data) {
+    throw adminFailure(payload, 'اقدام روی سفارش انجام نشد.')
+  }
+  return payload.data
+}
+
+export async function listAdminReceipts(
+  status: PaymentReceiptStatus | 'all' = 'PENDING',
+): Promise<PaymentReceipt[]> {
+  const receipts = await adminGet<PaymentReceipt[]>(
+    `${endpoints.admin.receipts}?status=${encodeURIComponent(status)}`,
+  )
+  if (!Array.isArray(receipts)) throw new ApiError('فهرست فیش‌های واریزی نامعتبر بود.')
+  return receipts
+}
+
+export type ReceiptAction = 'approve' | 'reject'
+
+export interface ReceiptActionResult {
+  receiptId: string
+  status: string
+  amount?: number
+  balance?: number | null
+  orderId?: string
+}
+
+export async function actOnReceipt(
+  receiptId: string,
+  action: ReceiptAction,
+): Promise<ReceiptActionResult> {
+  const payload = await apiPostProxy<AdminEnvelope<ReceiptActionResult>>(
+    endpoints.admin.receiptAction,
+    { receiptId, action },
+    { headers: adminHeaders() },
+  )
+  if (!payload || payload.success !== true || !payload.data) {
+    throw adminFailure(payload, 'اقدام روی فیش واریز انجام نشد.')
+  }
+  return payload.data
+}
+
+export async function fetchBankSettings(): Promise<BankAccountDetails> {
+  const data = await adminGet<BankAccountDetails>(endpoints.admin.bank)
+  return { ...data, updatedAt: data.updatedAt ?? null }
+}
+
+export async function saveBankSettings(
+  input: Pick<BankAccountDetails, 'cardNumber' | 'accountHolder'> & { bankName?: string },
+): Promise<BankAccountDetails> {
+  const payload = await apiPostProxy<AdminEnvelope<BankAccountDetails>>(
+    endpoints.admin.bank,
+    input,
+    { headers: adminHeaders() },
+  )
+  if (!payload || payload.success !== true || !payload.data) {
+    throw adminFailure(payload, 'ذخیره اطلاعات کارت انجام نشد.')
+  }
+  return { ...payload.data, updatedAt: payload.data.updatedAt ?? null }
 }
 
 export async function listAdminServers(): Promise<VpnServer[]> {

@@ -4,7 +4,6 @@ import type { ProfitMargin } from '@/lib/pricing'
 import { AUTO_MARGIN_TIERS, type AutoMarginTier } from '@/lib/pricing'
 import {
   mockAccountProducts,
-  mockBankDetails,
   mockBroadcasts,
   mockCoupons,
   mockProfitMargins,
@@ -136,7 +135,7 @@ export const useAdminStore = create<AdminState>()(
       productNotes: {},
       hiddenProductIds: [],
       deletedProductIds: [],
-      bankDetails: mockBankDetails,
+      bankDetails: { cardNumber: '', accountHolder: '', bankName: '', updatedAt: null },
       tickets: mockSupportTickets,
       broadcasts: mockBroadcasts,
       providerKeys: {

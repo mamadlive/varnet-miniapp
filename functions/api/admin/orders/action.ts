@@ -1,0 +1,220 @@
+/**
+ * Cloudflare Pages Function — POST /api/admin/orders/action
+ *
+ * Admin order decisions:
+ * - `complete`: marks a paid order as completed and stores the delivery note
+ *   (account credentials / VPN config) the Mini App shows to the customer.
+ * - `reject`: marks the order refunded and, for paid orders, atomically credits
+ *   the full total back to the customer's wallet plus a `refund` transaction.
+ *
+ * The refund uses guarded statements in one D1 batch, so a double-click can
+ * never credit the wallet twice.
+ */
+
+import {
+  authenticateAdmin,
+  failure,
+  internalFailure,
+  jsonResponse,
+  type PagesContext,
+} from '../_shared'
+
+interface OrderRow {
+  id: string
+  user_id: string
+  product_title: string
+  total: number
+  status: string
+  payment_method: string | null
+}
+
+interface ActionBody {
+  orderId?: unknown
+  action?: unknown
+  deliveryNote?: unknown
+}
+
+interface RefundResult {
+  refunded: number
+  balance: number | null
+}
+
+const MAX_BODY_BYTES = 8_192
+const MAX_NOTE_LENGTH = 4_000
+
+async function readBody(context: PagesContext): Promise<ActionBody | null> {
+  let raw: string
+  try {
+    raw = await context.request.text()
+  } catch {
+    return null
+  }
+  if (raw.length > MAX_BODY_BYTES) return null
+  try {
+    const parsed: unknown = JSON.parse(raw)
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return null
+    return parsed as ActionBody
+  } catch {
+    return null
+  }
+}
+
+async function completeOrder(
+  context: PagesContext,
+  order: OrderRow,
+  deliveryNote: string,
+): Promise<Response> {
+  const db = context.env.DB!
+  const now = new Date().toISOString()
+
+  if (order.status !== 'paid' && order.status !== 'provisioning') {
+    return failure(409, 'ORDER_NOT_PAYABLE', 'فقط سفارش پرداخت‌شده قابل تکمیل است.')
+  }
+
+  const result = await db
+    .prepare(
+      `UPDATE orders
+       SET status = 'completed', delivery_note = ?, updated_at = ?
+       WHERE id = ? AND status IN ('paid', 'provisioning')`,
+    )
+    .bind(deliveryNote || order.product_title, now, order.id)
+    .run()
+
+  if ((result.meta?.changes ?? 0) !== 1) {
+    return failure(409, 'ORDER_STATE_CHANGED', 'وضعیت سفارش تغییر کرده است؛ فهرست را به‌روز کنید.')
+  }
+
+  return jsonResponse({
+    success: true,
+    message: 'سفارش تکمیل شد و اطلاعات تحویل برای کاربر ثبت گردید.',
+    data: { orderId: order.id, status: 'completed', updatedAt: now },
+  })
+}
+
+async function rejectOrder(
+  context: PagesContext,
+  order: OrderRow,
+): Promise<Response> {
+  const db = context.env.DB!
+  const now = new Date().toISOString()
+  const refundTotal = order.status === 'paid' || order.status === 'provisioning' ? Number(order.total) : 0
+  const refundTxId = `txn_${crypto.randomUUID()}`
+
+  const batch = [
+    db
+      .prepare(
+        `UPDATE orders
+         SET status = 'refunded', updated_at = ?
+         WHERE id = ? AND status IN ('pending', 'paid', 'provisioning')`,
+      )
+      .bind(now, order.id),
+  ]
+
+  if (refundTotal > 0) {
+    batch.push(
+      db
+        .prepare(
+          `UPDATE users SET balance = balance + ?, updated_at = ?
+           WHERE id = ?
+             AND NOT EXISTS (
+               SELECT 1 FROM wallet_transactions WHERE type = 'refund' AND reference = ?
+             )`,
+        )
+        .bind(refundTotal, now, order.user_id, order.id),
+      db
+        .prepare(
+          `INSERT INTO wallet_transactions
+             (id, user_id, type, amount, balance_after, currency, description, reference, created_at)
+           SELECT ?, ?, 'refund', ?, balance, 'IRT', ?, ?, ?
+           FROM users
+           WHERE id = ?
+             AND NOT EXISTS (
+               SELECT 1 FROM wallet_transactions WHERE type = 'refund' AND reference = ?
+             )`,
+        )
+        .bind(
+          refundTxId,
+          order.user_id,
+          refundTotal,
+          `بازگشت وجه سفارش ${order.product_title}`,
+          order.id,
+          now,
+          order.user_id,
+          order.id,
+        ),
+    )
+  }
+
+  const results = await db.batch(batch)
+  if ((results[0]?.meta?.changes ?? 0) !== 1) {
+    return failure(409, 'ORDER_STATE_CHANGED', 'این سفارش دیگر قابل رد نیست؛ فهرست را به‌روز کنید.')
+  }
+
+  let balance: number | null = null
+  try {
+    const row = await db
+      .prepare('SELECT balance FROM users WHERE id = ?')
+      .bind(order.user_id)
+      .first<{ balance: number }>()
+    balance = row ? Number(row.balance) : null
+  } catch {
+    balance = null
+  }
+
+  const refunded = refundTotal > 0 && (results[1]?.meta?.changes ?? 0) === 1 ? refundTotal : 0
+  const result: RefundResult = { refunded, balance }
+
+  return jsonResponse({
+    success: true,
+    message: refunded > 0
+      ? `سفارش رد شد و ${refunded.toLocaleString('en-US')} تومان به کیف پول کاربر برگشت.`
+      : 'سفارش رد شد. این سفارش پرداختی نداشت و مبلغی به کیف پول برنگشت.',
+    data: { orderId: order.id, status: 'refunded', ...result },
+  })
+}
+
+export async function onRequestPost(context: PagesContext): Promise<Response> {
+  try {
+    const auth = await authenticateAdmin(context.request, context.env)
+    if (!auth.ok) return failure(auth.status, auth.code, auth.message)
+
+    const body = await readBody(context)
+    if (!body) return failure(400, 'INVALID_BODY', 'ساختار درخواست اقدام سفارش نامعتبر است.')
+
+    const orderId = typeof body.orderId === 'string' ? body.orderId.trim() : ''
+    if (!orderId || orderId.length > 128) {
+      return failure(400, 'INVALID_ORDER', 'شناسه سفارش نامعتبر است.')
+    }
+
+    const action = body.action
+    if (action !== 'complete' && action !== 'reject') {
+      return failure(400, 'INVALID_ACTION', 'اقدام سفارش نامعتبر است.')
+    }
+
+    const deliveryNote = typeof body.deliveryNote === 'string' ? body.deliveryNote.trim() : ''
+    if (deliveryNote.length > MAX_NOTE_LENGTH) {
+      return failure(400, 'INVALID_NOTE', 'اطلاعات تحویل بیش از حد طولانی است.')
+    }
+
+    const db = context.env.DB!
+    let order: OrderRow | null
+    try {
+      order = await db
+        .prepare(
+          `SELECT id, user_id, product_title, total, status, payment_method
+           FROM orders WHERE id = ?`,
+        )
+        .bind(orderId)
+        .first<OrderRow>()
+    } catch {
+      return failure(503, 'DB_UNAVAILABLE', 'خواندن سفارش از پایگاه داده انجام نشد.')
+    }
+    if (!order) return failure(404, 'ORDER_NOT_FOUND', 'سفارش پیدا نشد.')
+
+    return action === 'complete'
+      ? await completeOrder(context, order, deliveryNote)
+      : await rejectOrder(context, order)
+  } catch (cause) {
+    return internalFailure(cause, 'ORDER_ACTION_FAILED')
+  }
+}

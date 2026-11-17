@@ -34,6 +34,7 @@ const UsersPage = lazy(() => import('@/pages/admin/UsersPage'))
 const ProductsPage = lazy(() => import('@/pages/admin/ProductsPage'))
 const VpnServersPage = lazy(() => import('@/pages/admin/VpnServersPage'))
 const AdminOrdersPage = lazy(() => import('@/pages/admin/OrdersPage'))
+const AdminReceiptsPage = lazy(() => import('@/pages/admin/PaymentReceiptsPage'))
 const CouponsPage = lazy(() => import('@/pages/admin/CouponsPage'))
 const TicketsPage = lazy(() => import('@/pages/admin/TicketsPage'))
 const BroadcastPage = lazy(() => import('@/pages/admin/BroadcastPage'))
@@ -93,6 +94,7 @@ export default function App() {
               <Route path="products" element={<ProductsPage />} />
               <Route path="vpn-servers" element={<VpnServersPage />} />
               <Route path="orders" element={<AdminOrdersPage />} />
+              <Route path="receipts" element={<AdminReceiptsPage />} />
               <Route path="coupons" element={<CouponsPage />} />
               <Route path="tickets" element={<TicketsPage />} />
               <Route path="broadcast" element={<BroadcastPage />} />

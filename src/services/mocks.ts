@@ -2,10 +2,8 @@ import type {
   AccountProduct,
   ActiveService,
   AdminStats,
-  BankAccountDetails,
   Broadcast,
   Coupon,
-  Order,
   RevenuePoint,
   SupportTicket,
   TelegramUser,
@@ -583,106 +581,9 @@ export const mockTransactions: Transaction[] = [
   },
 ]
 
-export const mockOrders: Order[] = [
-  {
-    id: 'ord_2041',
-    userId: 'usr_demo',
-    userName: 'آرش محمدی',
-    items: [{ productId: 'vpn_fra_30', title: 'آی‌پی ثابت اختصاصی · آلمان', kind: 'vpn', quantity: 1, unitPrice: 150_000 }],
-    total: 150_000,
-    currency: 'IRT',
-    status: 'completed',
-    kind: 'vpn',
-    createdAt: iso(1, 5),
-    updatedAt: iso(1, 4),
-  },
-  {
-    id: 'ord_2040',
-    userId: 'usr_2',
-    userName: 'سارا احمدی',
-    items: [{ productId: 'acc_chatgpt', title: 'چت‌جی‌پی‌تی پلاس', kind: 'account', quantity: 1, unitPrice: 1_450_000 }],
-    total: 1_450_000,
-    currency: 'IRT',
-    status: 'completed',
-    kind: 'account',
-    createdAt: iso(1, 9),
-    updatedAt: iso(1, 8),
-  },
-  {
-    id: 'ord_2039',
-    userId: 'usr_3',
-    userName: 'محمدرضا رضایی',
-    items: [{ productId: 'vpn_fra_30', title: 'آی‌پی ثابت اختصاصی · آلمان', kind: 'vpn', quantity: 1, unitPrice: 150_000 }],
-    total: 150_000,
-    currency: 'IRT',
-    status: 'provisioning',
-    kind: 'vpn',
-    createdAt: iso(2, 2),
-    updatedAt: iso(2, 1),
-  },
-  {
-    id: 'ord_2038',
-    userId: 'usr_demo',
-    userName: 'آرش محمدی',
-    items: [{ productId: 'acc_netflix', title: 'نتفلیکس پریمیوم', kind: 'account', quantity: 1, unitPrice: 450_000 }],
-    total: 450_000,
-    currency: 'IRT',
-    status: 'refunded',
-    kind: 'account',
-    createdAt: iso(2, 1),
-    updatedAt: iso(2, 0),
-  },
-  {
-    id: 'ord_2037',
-    userId: 'usr_4',
-    userName: 'نادیا کریمی',
-    items: [{ productId: 'acc_steam', title: 'استیم والت ۵۰ دلاری', kind: 'account', quantity: 1, unitPrice: 4_750_000 }],
-    total: 4_750_000,
-    currency: 'IRT',
-    status: 'paid',
-    kind: 'account',
-    createdAt: iso(3, 6),
-    updatedAt: iso(3, 6),
-  },
-  {
-    id: 'ord_2036',
-    userId: 'usr_5',
-    userName: 'علی حسینی',
-    items: [
-      { productId: 'vpn_fra_30', title: 'آی‌پی ثابت اختصاصی · آلمان', kind: 'vpn', quantity: 1, unitPrice: 150_000 },
-      { productId: 'acc_discord', title: 'دیسکورد نیترو', kind: 'account', quantity: 1, unitPrice: 620_000 },
-    ],
-    total: 770_000,
-    currency: 'IRT',
-    status: 'pending',
-    kind: 'vpn',
-    createdAt: iso(4, 3),
-    updatedAt: iso(4, 3),
-  },
-  {
-    id: 'ord_2035',
-    userId: 'usr_demo',
-    userName: 'آرش محمدی',
-    items: [{ productId: 'acc_adobe', title: 'ادوبی کریتیو کلود', kind: 'account', quantity: 1, unitPrice: 1_650_000 }],
-    total: 1_650_000,
-    currency: 'IRT',
-    status: 'completed',
-    kind: 'account',
-    createdAt: iso(4, 7),
-    updatedAt: iso(4, 6),
-  },
-]
-
 /* -------------------------------------------------------------------------- */
-/* Support, broadcasts & payment details                                      */
+/* Support & broadcasts                                                       */
 /* -------------------------------------------------------------------------- */
-
-export const mockBankDetails: BankAccountDetails = {
-  cardNumber: '6037997512345678',
-  accountHolder: 'آرش محمدی',
-  bankName: 'بانک ملی ایران',
-  updatedAt: iso(2),
-}
 
 export const mockSupportTickets: SupportTicket[] = [
   {

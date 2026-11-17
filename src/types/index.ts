@@ -194,17 +194,45 @@ export interface OrderItem {
   unitPrice: number
 }
 
+export type PaymentMethod = 'wallet' | 'card'
+
 export interface Order {
   id: string
   userId: string
   userName?: string
+  telegramId?: number
   items: OrderItem[]
   total: number
   currency: Currency
   status: OrderStatus
   kind: OrderKind
+  /** Channel the order was paid (or will be paid) through. */
+  paymentMethod?: PaymentMethod
+  /** Account credentials / config text an admin attached on completion. */
+  deliveryNote?: string
   createdAt: string
   updatedAt: string
+}
+
+export type PaymentReceiptPurpose = 'wallet_topup' | 'product_purchase'
+export type PaymentReceiptStatus = 'PENDING' | 'APPROVED' | 'REJECTED'
+
+/** Card-to-card claim awaiting an admin decision. */
+export interface PaymentReceipt {
+  id: string
+  userId: string
+  userName?: string
+  telegramId?: number
+  purpose: PaymentReceiptPurpose
+  orderId?: string
+  productTitle?: string
+  amount: number
+  currency: Currency
+  reference: string
+  status: PaymentReceiptStatus
+  note?: string
+  createdAt: string
+  reviewedAt?: string
 }
 
 export type TransactionType = 'deposit' | 'purchase' | 'refund' | 'withdrawal' | 'bonus'

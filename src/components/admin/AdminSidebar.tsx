@@ -1,6 +1,7 @@
 import type { LucideIcon } from 'lucide-react'
 import {
   ArrowUpRight,
+  CreditCard,
   Headset,
   LayoutDashboard,
   Megaphone,
@@ -46,6 +47,7 @@ const NAV_GROUPS: AdminNavGroup[] = [
     title: 'عملیات',
     items: [
       { to: '/admin/orders', label: 'سفارش‌ها', icon: ReceiptText },
+      { to: '/admin/receipts', label: 'تایید واریزی‌های کارت', icon: CreditCard },
       { to: '/admin/coupons', label: 'کدهای تخفیف', icon: TicketPercent },
     ],
   },

@@ -30,7 +30,12 @@ import {
   normalizeCardNumber,
 } from '@/lib/format'
 import type { AutoMarginTier } from '@/lib/pricing'
-import { fetchMarginTiers, saveMarginTiers } from '@/services/admin.service'
+import {
+  fetchBankSettings,
+  fetchMarginTiers,
+  saveBankSettings,
+  saveMarginTiers,
+} from '@/services/admin.service'
 import { useAdminStore } from '@/store/adminStore'
 import type { ProviderKeyId } from '@/store/adminStore'
 
@@ -203,18 +208,41 @@ function ProviderKeyCard({ provider }: { provider: ProviderDefinition }) {
 
 /** Manual bank-transfer destination surfaced in the Mini App «افزایش موجودی» sheet. */
 function BankTransferCard() {
-  const bankDetails = useAdminStore((state) => state.bankDetails)
-  const saveBankDetails = useAdminStore((state) => state.saveBankDetails)
-
-  const [cardNumber, setCardNumber] = useState(bankDetails.cardNumber)
-  const [accountHolder, setAccountHolder] = useState(bankDetails.accountHolder)
-  const [bankName, setBankName] = useState(bankDetails.bankName ?? '')
+  const [cardNumber, setCardNumber] = useState('')
+  const [accountHolder, setAccountHolder] = useState('')
+  const [bankName, setBankName] = useState('')
   const [error, setError] = useState<string | null>(null)
   const [saved, setSaved] = useState(false)
+  const [loading, setLoading] = useState(true)
+  const [saving, setSaving] = useState(false)
+  const [updatedAt, setUpdatedAt] = useState<string | null>(null)
+
+  useEffect(() => {
+    let cancelled = false
+    fetchBankSettings()
+      .then((details) => {
+        if (cancelled) return
+        setCardNumber(details.cardNumber)
+        setAccountHolder(details.accountHolder)
+        setBankName(details.bankName ?? '')
+        setUpdatedAt(details.updatedAt)
+      })
+      .catch((cause: unknown) => {
+        if (!cancelled) {
+          setError(cause instanceof Error ? cause.message : 'خواندن اطلاعات کارت از سرور انجام نشد.')
+        }
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false)
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [])
 
   const digits = normalizeCardNumber(cardNumber)
 
-  const handleSave = () => {
+  const handleSave = async () => {
     if (digits.length !== 16) {
       setError('شماره کارت باید ۱۶ رقم باشد.')
       return
@@ -223,15 +251,31 @@ function BankTransferCard() {
       setError('نام صاحب حساب را کامل وارد کنید.')
       return
     }
-    saveBankDetails({
-      cardNumber: digits,
-      accountHolder: accountHolder.trim(),
-      bankName: bankName.trim() || undefined,
-    })
-    setCardNumber(digits)
+
+    setSaving(true)
     setError(null)
-    setSaved(true)
-    window.setTimeout(() => setSaved(false), 3200)
+    try {
+      const details = await saveBankSettings({
+        cardNumber: digits,
+        accountHolder: accountHolder.trim(),
+        bankName: bankName.trim() || undefined,
+      })
+      setCardNumber(details.cardNumber)
+      setAccountHolder(details.accountHolder)
+      setBankName(details.bankName ?? '')
+      setUpdatedAt(details.updatedAt)
+      useAdminStore.getState().saveBankDetails({
+        cardNumber: details.cardNumber,
+        accountHolder: details.accountHolder,
+        bankName: details.bankName,
+      })
+      setSaved(true)
+      window.setTimeout(() => setSaved(false), 3200)
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : 'ذخیره اطلاعات کارت انجام نشد.')
+    } finally {
+      setSaving(false)
+    }
   }
 
   return (
@@ -246,6 +290,7 @@ function BankTransferCard() {
             <Badge tone="success" size="sm">
               کارت به کارت
             </Badge>
+            {loading ? <span className="text-[11px] text-tg-hint">در حال خواندن از سرور…</span> : null}
             {saved ? (
               <span className="inline-flex items-center gap-1 text-[11px] font-medium text-emerald-600">
                 <CheckCircle2 className="size-3.5" aria-hidden />
@@ -254,8 +299,9 @@ function BankTransferCard() {
             ) : null}
           </div>
           <p className="mt-1 text-[12px] leading-relaxed text-tg-hint">
-            این اطلاعات در برگه افزایش موجودی کیف پول به کاربر نمایش داده می‌شود؛ تا زمان اتصال
-            درگاه خودکار، واریز دستی از همین کارت انجام می‌گیرد.
+            این اطلاعات در پایگاه داده ذخیره می‌شود و هنگام انتخاب «کارت به کارت» در خرید محصول و
+            افزایش موجودی به کاربر نمایش داده می‌شود. تا زمان اتصال درگاه خودکار، واریز دستی از همین
+            کارت انجام می‌گیرد.
           </p>
         </div>
       </div>
@@ -294,15 +340,15 @@ function BankTransferCard() {
           placeholder="مثلاً بانک ملی ایران"
           autoComplete="off"
           hint={
-            bankDetails.updatedAt
-              ? `آخرین به‌روزرسانی ${formatDateTime(bankDetails.updatedAt)}`
+            updatedAt
+              ? `آخرین به‌روزرسانی ${formatDateTime(updatedAt)}`
               : 'شماره کارت و نام صاحب حساب الزامی است.'
           }
         />
       </div>
 
       <div className="flex justify-end">
-        <Button onClick={handleSave} leftIcon={<Save className="size-4" />}>
+        <Button onClick={() => void handleSave()} loading={saving} leftIcon={<Save className="size-4" />}>
           ذخیره اطلاعات کارت
         </Button>
       </div>
