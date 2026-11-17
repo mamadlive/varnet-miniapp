@@ -4,8 +4,11 @@
  * Admin order decisions:
  * - `complete`: marks a paid order as completed and stores the delivery note
  *   (account credentials / VPN config) the Mini App shows to the customer.
- * - `reject`: marks the order refunded and, for paid orders, atomically credits
- *   the full total back to the customer's wallet plus a `refund` transaction.
+ *   Static-IP orders completed without a note get a generated OpenVPN profile
+ *   built from the attached node, so the download works after one click.
+ * - `reject`: marks the order refunded, records the admin's reject reason on the
+ *   order and, for paid orders, atomically credits the full total back to the
+ *   customer's wallet plus a `refund` transaction.
  *
  * The refund uses guarded statements in one D1 batch, so a double-click can
  * never credit the wallet twice.
@@ -22,7 +25,9 @@ import {
 interface OrderRow {
   id: string
   user_id: string
+  product_id: string
   product_title: string
+  kind: string
   total: number
   status: string
   payment_method: string | null
@@ -32,6 +37,7 @@ interface ActionBody {
   orderId?: unknown
   action?: unknown
   deliveryNote?: unknown
+  rejectReason?: unknown
 }
 
 interface RefundResult {
@@ -39,8 +45,17 @@ interface RefundResult {
   balance: number | null
 }
 
+interface NodeInfo {
+  ip: string
+  protocol: string
+  name: string
+}
+
 const MAX_BODY_BYTES = 8_192
 const MAX_NOTE_LENGTH = 4_000
+const MAX_REASON_LENGTH = 1_000
+const MIN_REASON_LENGTH = 3
+const OPENVPN_PORT = 1_194
 
 async function readBody(context: PagesContext): Promise<ActionBody | null> {
   let raw: string
@@ -59,10 +74,104 @@ async function readBody(context: PagesContext): Promise<ActionBody | null> {
   }
 }
 
+function safeHost(value: string): string {
+  return value.replace(/[^a-zA-Z0-9.:-]/g, '')
+}
+
+/** Deterministic per-order RADIUS username: `vpn_<order uuid without dashes>`. */
+function configUsername(order: OrderRow): string {
+  const base = order.id.replace(/[^a-zA-Z0-9]/g, '')
+  return (base ? `vpn_${base}` : 'vpn_user').slice(0, 48)
+}
+
+function buildOpenVpnProfile(order: OrderRow, node: NodeInfo): string | null {
+  const host = safeHost(node.ip)
+  if (!host) return null
+
+  const username = configUsername(order)
+  const password = crypto.randomUUID().replace(/-/g, '')
+  const protocol = /tcp/i.test(node.protocol) ? 'tcp' : 'udp'
+
+  const lines = [
+    '# VarNet static-IP profile',
+    `# Node: ${node.name.replace(/[\r\n]+/g, ' ').trim() || 'static-ip'}`,
+    `# Account: ${username}`,
+    'client',
+    'dev tun',
+    `proto ${protocol}`,
+    `remote ${host} ${OPENVPN_PORT}`,
+    'resolv-retry infinite',
+    'nobind',
+    'persist-key',
+    'persist-tun',
+    'remote-cert-tls server',
+    'auth-nocache',
+    'verb 3',
+    '<auth-user-pass>',
+    username,
+    password,
+    '</auth-user-pass>',
+  ]
+
+  return `${lines.join('\n')}\n`
+}
+
+/**
+ * Finds the node attached to the purchased static-IP plan. The plan catalogue
+ * lives in `static_ip_plans`; legacy orders stored the node id as product id,
+ * so both lookups are attempted. Missing tables (older deployments) fall
+ * through to the next strategy instead of failing the approval.
+ */
+async function loadNodeInfo(
+  db: NonNullable<PagesContext['env']['DB']>,
+  productId: string,
+): Promise<NodeInfo | null> {
+  try {
+    const planNode = await db
+      .prepare(
+        `SELECT n.ip AS ip, n.protocol AS protocol, n.name AS name
+         FROM static_ip_plans p
+         JOIN static_ip_nodes n ON n.id = p.node_id
+         WHERE p.id = ?`,
+      )
+      .bind(productId)
+      .first<NodeInfo>()
+    if (planNode) return planNode
+  } catch {
+    // `static_ip_plans` absent in this deployment — try the legacy lookup.
+  }
+
+  try {
+    const node = await db
+      .prepare('SELECT ip, protocol, name FROM static_ip_nodes WHERE id = ?')
+      .bind(productId)
+      .first<NodeInfo>()
+    return node ?? null
+  } catch {
+    return null
+  }
+}
+
+async function resolveDeliveryNote(
+  db: NonNullable<PagesContext['env']['DB']>,
+  order: OrderRow,
+  adminNote: string,
+): Promise<string> {
+  if (adminNote) return adminNote
+  if (order.kind === 'vpn') {
+    const node = await loadNodeInfo(db, order.product_id)
+    if (node) {
+      const profile = buildOpenVpnProfile(order, node)
+      if (profile) return profile
+    }
+  }
+  return order.product_title
+}
+
 async function completeOrder(
   context: PagesContext,
   order: OrderRow,
-  deliveryNote: string,
+  adminNote: string,
 ): Promise<Response> {
   const db = context.env.DB!
   const now = new Date().toISOString()
@@ -75,19 +184,24 @@ async function completeOrder(
     return failure(409, 'ORDER_NOT_PAYABLE', 'فقط سفارش در انتظار یا پرداخت‌شده قابل تایید و تحویل است.')
   }
 
+  const deliveryNote = await resolveDeliveryNote(db, order, adminNote)
+  if (deliveryNote.length > MAX_NOTE_LENGTH) {
+    return failure(400, 'INVALID_NOTE', 'اطلاعات تحویل بیش از حد طولانی است.')
+  }
+
   const batch = [
     db
       .prepare(
         `UPDATE orders
-         SET status = 'completed', delivery_note = ?, updated_at = ?
+         SET status = 'completed', delivery_note = ?
          WHERE id = ? AND status IN ('pending', 'paid', 'provisioning')`,
       )
-      .bind(deliveryNote || order.product_title, now, order.id),
+      .bind(deliveryNote, order.id),
     // Delivering a pending card-to-card order is the admin's approval of its receipt.
     db
       .prepare(
         `UPDATE payment_receipts
-         SET status = 'APPROVED', updated_at = ?
+         SET status = 'APPROVED', reviewed_at = ?
          WHERE order_id = ? AND purpose = 'product_purchase' AND status = 'PENDING'`,
       )
       .bind(now, order.id),
@@ -102,27 +216,34 @@ async function completeOrder(
   return jsonResponse({
     success: true,
     message: 'سفارش تکمیل شد و اطلاعات تحویل برای کاربر ثبت گردید.',
-    data: { orderId: order.id, status: 'completed', updatedAt: now },
+    data: {
+      orderId: order.id,
+      status: 'completed',
+      deliveryNote,
+      updatedAt: now,
+    },
   })
 }
 
 async function rejectOrder(
   context: PagesContext,
   order: OrderRow,
+  reason: string,
 ): Promise<Response> {
   const db = context.env.DB!
   const now = new Date().toISOString()
   const refundTotal = order.status === 'paid' || order.status === 'provisioning' ? Number(order.total) : 0
   const refundTxId = `txn_${crypto.randomUUID()}`
+  const rejectionNote = `دلیل رد سفارش: ${reason}`
 
   const batch = [
     db
       .prepare(
         `UPDATE orders
-         SET status = 'refunded', updated_at = ?
+         SET status = 'refunded', delivery_note = ?
          WHERE id = ? AND status IN ('pending', 'paid', 'provisioning')`,
       )
-      .bind(now, order.id),
+      .bind(rejectionNote, order.id),
   ]
 
   if (refundTotal > 0) {
@@ -184,7 +305,7 @@ async function rejectOrder(
     message: refunded > 0
       ? `سفارش رد شد و ${refunded.toLocaleString('en-US')} تومان به کیف پول کاربر برگشت.`
       : 'سفارش رد شد. این سفارش پرداختی نداشت و مبلغی به کیف پول برنگشت.',
-    data: { orderId: order.id, status: 'refunded', ...result },
+    data: { orderId: order.id, status: 'refunded', reason, ...result },
   })
 }
 
@@ -211,12 +332,20 @@ export async function onRequestPost(context: PagesContext): Promise<Response> {
       return failure(400, 'INVALID_NOTE', 'اطلاعات تحویل بیش از حد طولانی است.')
     }
 
+    const rejectReason = typeof body.rejectReason === 'string' ? body.rejectReason.trim() : ''
+    if (rejectReason.length > MAX_REASON_LENGTH) {
+      return failure(400, 'INVALID_REASON', 'دلیل رد سفارش بیش از حد طولانی است.')
+    }
+    if (action === 'reject' && rejectReason.length < MIN_REASON_LENGTH) {
+      return failure(400, 'REJECT_REASON_REQUIRED', 'دلیل رد سفارش را وارد کنید.')
+    }
+
     const db = context.env.DB!
     let order: OrderRow | null
     try {
       order = await db
         .prepare(
-          `SELECT id, user_id, product_title, total, status, payment_method
+          `SELECT id, user_id, product_id, product_title, kind, total, status, payment_method
            FROM orders WHERE id = ?`,
         )
         .bind(orderId)
@@ -228,7 +357,7 @@ export async function onRequestPost(context: PagesContext): Promise<Response> {
 
     return action === 'complete'
       ? await completeOrder(context, order, deliveryNote)
-      : await rejectOrder(context, order)
+      : await rejectOrder(context, order, rejectReason)
   } catch (cause) {
     return internalFailure(cause, 'ORDER_ACTION_FAILED')
   }

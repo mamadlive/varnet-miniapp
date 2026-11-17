@@ -393,8 +393,8 @@ export async function onRequestPost(context: PagesContext): Promise<Response> {
         db
           .prepare(
             `INSERT INTO orders
-               (id, user_id, product_id, product_title, kind, quantity, subtotal, discount, total, currency, coupon_code, status, payment_method, created_at, updated_at)
-             VALUES (?, ?, ?, ?, ?, 1, ?, ?, ?, 'IRT', ?, 'pending', 'card', ?, ?)`,
+               (id, user_id, product_id, product_title, kind, quantity, subtotal, discount, total, currency, coupon_code, status, payment_method, created_at)
+             VALUES (?, ?, ?, ?, ?, 1, ?, ?, ?, 'IRT', ?, 'pending', 'card', ?)`,
           )
           .bind(
             orderId,
@@ -406,7 +406,6 @@ export async function onRequestPost(context: PagesContext): Promise<Response> {
             discount,
             total,
             couponCode ?? null,
-            now,
             now,
           ),
         db
@@ -480,8 +479,8 @@ export async function onRequestPost(context: PagesContext): Promise<Response> {
       db
         .prepare(
           `INSERT INTO orders
-             (id, user_id, product_id, product_title, kind, quantity, subtotal, discount, total, currency, coupon_code, status, payment_method, created_at, updated_at)
-           VALUES (?, ?, ?, ?, ?, 1, ?, ?, ?, 'IRT', ?, 'paid', 'wallet', ?, ?)`,
+             (id, user_id, product_id, product_title, kind, quantity, subtotal, discount, total, currency, coupon_code, status, payment_method, created_at)
+           VALUES (?, ?, ?, ?, ?, 1, ?, ?, ?, 'IRT', ?, 'paid', 'wallet', ?)`,
         )
         .bind(
           orderId,
@@ -493,7 +492,6 @@ export async function onRequestPost(context: PagesContext): Promise<Response> {
           discount,
           total,
           couponCode ?? null,
-          now,
           now,
         ),
       db

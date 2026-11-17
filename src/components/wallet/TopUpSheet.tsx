@@ -195,6 +195,7 @@ export function TopUpSheet({
       onClose={handleClose}
       title={fa.wallet.topUp}
       description="برای خرید اکانت و پلن‌های آی‌پی ثابت، کیف پول را شارژ کنید."
+      className="flex max-h-[92vh] flex-col"
       footer={
         <>
           <Button
@@ -220,7 +221,8 @@ export function TopUpSheet({
         </>
       }
     >
-      <div className="space-y-4">
+      <div className="max-h-[82vh] min-h-0 flex-1 overflow-y-auto overscroll-contain pe-0.5 pb-24">
+        <div className="space-y-4">
         <div className="space-y-2">
           <p className="text-[13px] font-medium text-tg-hint">روش پرداخت</p>
 
@@ -429,6 +431,7 @@ export function TopUpSheet({
             })}
           </div>
         </div>
+      </div>
       </div>
     </Sheet>
   )

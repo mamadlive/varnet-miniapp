@@ -144,10 +144,11 @@ export async function actOnOrder(
   orderId: string,
   action: OrderAction,
   deliveryNote?: string,
+  rejectReason?: string,
 ): Promise<OrderActionResult> {
   const payload = await apiPostProxy<AdminEnvelope<OrderActionResult>>(
     endpoints.admin.orderAction,
-    { orderId, action, deliveryNote },
+    { orderId, action, deliveryNote, rejectReason },
     { headers: adminHeaders() },
   )
   if (!payload || payload.success !== true || !payload.data) {

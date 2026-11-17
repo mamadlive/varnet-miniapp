@@ -61,7 +61,6 @@ interface OrderRow {
   payment_method: string | null
   delivery_note: string | null
   created_at: string
-  updated_at: string | null
 }
 
 const ORDER_LIMIT = 100
@@ -144,7 +143,7 @@ function toOrder(row: OrderRow): unknown {
     paymentMethod: row.payment_method === 'card' ? 'card' : 'wallet',
     deliveryNote: row.delivery_note ?? undefined,
     createdAt: row.created_at,
-    updatedAt: row.updated_at ?? row.created_at,
+    updatedAt: row.created_at,
   }
 }
 
@@ -160,7 +159,7 @@ export async function onRequestGet(context: PagesContext): Promise<Response> {
     const result = await db
       .prepare(
         `SELECT id, user_id, product_id, product_title, kind, quantity, subtotal, discount,
-                total, currency, status, payment_method, delivery_note, created_at, updated_at
+                total, currency, status, payment_method, delivery_note, created_at
          FROM orders
          WHERE user_id = ?
          ORDER BY created_at DESC

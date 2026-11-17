@@ -26,7 +26,6 @@ interface OrderRow {
   payment_method: string | null
   delivery_note: string | null
   created_at: string
-  updated_at: string | null
   first_name: string | null
   last_name: string | null
   username: string | null
@@ -46,7 +45,7 @@ export async function onRequestGet(context: PagesContext): Promise<Response> {
       .prepare(
         `SELECT o.id, o.user_id, o.product_id, o.product_title, o.kind, o.quantity,
                 o.subtotal, o.discount, o.total, o.status, o.payment_method,
-                o.delivery_note, o.created_at, o.updated_at,
+                o.delivery_note, o.created_at,
                 u.first_name, u.last_name, u.username, u.telegram_id
          FROM orders o
          LEFT JOIN users u ON u.id = o.user_id
@@ -87,7 +86,7 @@ export async function onRequestGet(context: PagesContext): Promise<Response> {
         paymentMethod: row.payment_method === 'card' ? 'card' : 'wallet',
         deliveryNote: row.delivery_note ?? undefined,
         createdAt: row.created_at,
-        updatedAt: row.updated_at ?? row.created_at,
+        updatedAt: row.created_at,
       }
     }),
     meta: { count: rows.length, limit: ORDER_LIMIT },

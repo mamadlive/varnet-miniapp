@@ -237,6 +237,10 @@ export default function OrdersPage() {
 
   const submitAction = async () => {
     if (!actionState || actionBusy) return
+    if (actionState.action === 'reject' && note.trim().length < 3) {
+      setActionError('دلیل رد سفارش را وارد کنید (حداقل ۳ حرف).')
+      return
+    }
     setActionBusy(true)
     setActionError(null)
     setFeedback(null)
@@ -245,6 +249,7 @@ export default function OrdersPage() {
         actionState.order.id,
         actionState.action,
         actionState.action === 'complete' ? note.trim() : undefined,
+        actionState.action === 'reject' ? note.trim() : undefined,
       )
       setFeedback(
         actionState.action === 'complete'
@@ -432,25 +437,43 @@ export default function OrdersPage() {
         {isComplete ? (
           <div className="space-y-2">
             <label htmlFor="order-delivery-note" className="block text-[13px] font-medium text-tg-hint">
-              اطلاعات تحویل (نام کاربری، رمز، لینک کانفیگ…)
+              اطلاعات تحویل (اختیاری)
             </label>
             <textarea
               id="order-delivery-note"
               value={note}
               onChange={(event) => setNote(event.target.value)}
               rows={6}
-              placeholder="این متن در بخش «سفارش‌های من» به کاربر نمایش داده می‌شود."
+              placeholder="اختیاری: نام کاربری، رمز، لینک کانفیگ…"
               className="w-full rounded-xl border border-tg-separator bg-tg-bg p-3 text-[12.5px] leading-relaxed text-tg-text outline-none focus:border-brand-500"
             />
             <p className="text-[11px] leading-relaxed text-tg-hint">
               سفارش مستقیماً به وضعیت «تحویل شد» تغییر می‌کند و همین متن برای مشتری قابل مشاهده
-              خواهد بود. برای سفارش‌های کارت‌به‌کارت، تایید این مرحله به‌منزله تایید فیش واریز است.
+              خواهد بود. اگر این کادر را خالی بگذارید و سفارش آی‌پی ثابت باشد، فایل کانفیگ
+              OpenVPN به‌صورت خودکار از اطلاعات نود (آی‌پی، پورت، پروتکل و نام کاربری) ساخته و
+              تحویل داده می‌شود. برای سفارش‌های کارت‌به‌کارت، تایید این مرحله به‌منزله تایید فیش
+              واریز است.
             </p>
           </div>
         ) : (
           <div className="space-y-2">
+            <label htmlFor="order-reject-reason" className="block text-[13px] font-medium text-tg-hint">
+              دلیل رد سفارش
+            </label>
+            <textarea
+              id="order-reject-reason"
+              value={note}
+              onChange={(event) => {
+                setNote(event.target.value)
+                setActionError(null)
+              }}
+              rows={4}
+              placeholder="مثلاً فیش واریزی معتبر نبود یا مبلغ واریز با سفارش هم‌خوانی ندارد."
+              className="w-full rounded-xl border border-tg-separator bg-tg-bg p-3 text-[12.5px] leading-relaxed text-tg-text outline-none focus:border-brand-500"
+            />
             <p className="text-[13px] leading-relaxed text-tg-text">
-              این سفارش به وضعیت «بازگشت وجه» تغییر می‌کند. اگر پرداخت انجام شده باشد، مبلغ{' '}
+              این سفارش به وضعیت «بازگشت وجه» تغییر می‌کند و دلیل برای پیگیری در سفارش ثبت
+              می‌شود. اگر پرداخت انجام شده باشد، مبلغ{' '}
               <bdi>{formatCurrency(actionState?.order.total ?? 0)}</bdi> به‌صورت اتمیک به کیف پول
               کاربر برگردانده می‌شود.
             </p>

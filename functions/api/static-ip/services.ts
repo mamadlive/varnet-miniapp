@@ -17,7 +17,6 @@ interface ServiceRow {
   status: string
   delivery_note: string | null
   created_at: string
-  updated_at: string | null
 }
 
 const SERVICE_LIMIT = 50
@@ -47,11 +46,11 @@ export async function onRequestGet(context: UserContext): Promise<Response> {
   try {
     const result = await db
       .prepare(
-        `SELECT id, product_title, total, currency, status, delivery_note, created_at, updated_at
+        `SELECT id, product_title, total, currency, status, delivery_note, created_at
          FROM orders
          WHERE user_id = ? AND kind = 'vpn'
            AND status IN ('pending', 'paid', 'completed')
-         ORDER BY COALESCE(updated_at, created_at) DESC
+         ORDER BY created_at DESC
          LIMIT ?`,
       )
       .bind(userIdFor(auth.user), SERVICE_LIMIT)
@@ -72,7 +71,7 @@ export async function onRequestGet(context: UserContext): Promise<Response> {
       amount: Number(row.total),
       currency: 'IRT',
       purchasedAt: row.created_at,
-      completedAt: row.updated_at ?? row.created_at,
+      completedAt: row.created_at,
     })),
     meta: { count: rows.length, limit: SERVICE_LIMIT },
   })

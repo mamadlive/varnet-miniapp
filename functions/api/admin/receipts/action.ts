@@ -68,10 +68,10 @@ async function approveReceipt(
     const results = await db.batch([
       db
         .prepare(
-          `UPDATE orders SET status = 'paid', updated_at = ?
+          `UPDATE orders SET status = 'paid'
            WHERE id = ? AND status = 'pending'`,
         )
-        .bind(now, receipt.order_id),
+        .bind(receipt.order_id),
       db
         .prepare(
           `UPDATE payment_receipts SET status = 'APPROVED', reviewed_at = ?
@@ -173,10 +173,10 @@ async function rejectReceipt(
     statements.push(
       db
         .prepare(
-          `UPDATE orders SET status = 'cancelled', updated_at = ?
+          `UPDATE orders SET status = 'cancelled'
            WHERE id = ? AND status = 'pending'`,
         )
-        .bind(now, receipt.order_id),
+        .bind(receipt.order_id),
     )
   }
 
