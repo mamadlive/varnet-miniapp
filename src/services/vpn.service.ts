@@ -1,10 +1,7 @@
-import { env } from '@/config/env'
-import { sleep } from '@/lib/utils'
-import { formatCount } from '@/lib/format'
 import { apiGet, apiPost } from '@/services/apiClient'
 import { endpoints } from '@/services/endpoints'
-import { mockActiveServices, mockVpnPlans, mockVpnServers } from '@/services/mocks'
-import type { ActiveService, Currency, VpnPlan, VpnServer } from '@/types'
+import { listStaticIpNodes, mapNodeToPlan, mapNodeToServer } from '@/services/staticIp.service'
+import type { VpnPlan, VpnServer } from '@/types'
 
 /* -------------------------------------------------------------------------- */
 /* Transport contracts — mirrors the Linux RADIUS API (`/v1`)                 */
@@ -67,164 +64,17 @@ export interface VpnUsage {
 export type VpnCustomer = Record<string, unknown>
 
 /* -------------------------------------------------------------------------- */
-/* Domain mapping                                                             */
+/* Catalogue (D1 static_ip_nodes)                                             */
 /* -------------------------------------------------------------------------- */
 
-const BYTES_PER_GB = 1024 ** 3
-const SECONDS_PER_DAY = 86_400
-const DEFAULT_SERVER_CODE = '49'
-
-function normalizePrice(amount: number, code: string): { price: number; currency: Currency } {
-  const currency = code.trim().toUpperCase()
-
-  if (currency === 'IRR') {
-    // 1 Toman = 10 Rial. The catalogue is Toman-first, so convert Rial prices.
-    return { price: Math.round(amount / 10), currency: 'IRT' }
-  }
-
-  // IRT — and legacy/mislabeled codes (e.g. USD test rows) — are Toman amounts.
-  return { price: amount, currency: 'IRT' }
-}
-
-/** Map a RADIUS plan row onto the UI's `VpnPlan` model. */
-export function mapVpnPlan(record: VpnPlanRecord): VpnPlan {
-  const quotaGb = Math.round(record.quota_bytes / BYTES_PER_GB)
-  const durationDays = Math.max(1, Math.round(record.duration_seconds / SECONDS_PER_DAY))
-  const isActive = record.plan_status.toUpperCase() === 'ACTIVE'
-  const { price, currency } = normalizePrice(record.price_amount, record.price_currency)
-
-  return {
-    // `plan_code` is what `POST /v1/provision` expects, so use it as the id.
-    id: record.plan_code || record.id,
-    name: record.display_name || record.plan_code,
-    serverId: DEFAULT_SERVER_CODE,
-    // The RADIUS API exposes no node geography; the UI falls back to a globe.
-    location: 'سرور اختصاصی',
-    countryCode: '',
-    price,
-    currency,
-    durationDays,
-    bandwidthMbps: 1_000,
-    staticIp: true,
-    // `/v1/plans` has no inventory counter — active plans are purchasable.
-    stock: isActive ? 999 : 0,
-    isActive,
-    availability: isActive ? 'in_stock' : 'sold_out',
-    features: [
-      `${formatCount(quotaGb)} گیگابایت حجم`,
-      `${formatCount(durationDays)} روز اعتبار`,
-      'آی‌پی ثابت اختصاصی',
-      'تونل امن OpenVPN (UDP)',
-    ],
-  }
-}
-
-/* -------------------------------------------------------------------------- */
-/* Catalogue                                                                  */
-/* -------------------------------------------------------------------------- */
-
-/** Live static-IP catalogue (`GET /v1/plans`). */
+/** Purchasable storefront catalogue — enabled D1 nodes only. */
 export async function listVpnPlans(): Promise<VpnPlan[]> {
-  try {
-    const records = await apiGet<VpnPlanRecord[]>(endpoints.vpn.plans)
-    return records.map(mapVpnPlan)
-  } catch (error) {
-    // `/v1/plans` has no per-location inventory yet. In demo mode the fixtures
-    // keep the Germany-only catalogue explorable offline; production surfaces
-    // the real failure so nobody buys against a stale mock.
-    if (env.demoMode) return mockVpnPlans
-    throw error
-  }
+  return (await listStaticIpNodes()).map(mapNodeToPlan)
 }
 
-/**
- * Node inventory is not exposed by the RADIUS API yet, so the dashboard/admin
- * views keep rendering the local fixtures.
- */
+/** Node strip entries — same enabled D1 nodes, no local fixtures. */
 export async function listVpnServers(): Promise<VpnServer[]> {
-  await sleep(180)
-  return mockVpnServers
-}
-
-/**
- * Provisioned subscriptions for the signed-in customer. The RADIUS API exposes
- * usage per username via `/v1/usage`; until that is wired to a session lookup
- * («سرویس‌های من») reads local fixtures.
- */
-export async function listActiveServices(): Promise<ActiveService[]> {
-  await sleep(220)
-  return mockActiveServices
-}
-
-/* -------------------------------------------------------------------------- */
-/* Static-IP provisioning (mock)                                              */
-/* -------------------------------------------------------------------------- */
-
-const DAY_MS = 86_400_000
-const USERNAME_ALPHABET = 'abcdefghijkmnopqrstuvwxyz23456789'
-const PASSWORD_ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789'
-
-function randomToken(length: number, alphabet: string): string {
-  const bytes = new Uint8Array(length)
-  crypto.getRandomValues(bytes)
-  return Array.from(bytes, (byte) => alphabet[byte % alphabet.length]).join('')
-}
-
-function nextStaticIp(): string {
-  return `185.55.226.${20 + Math.floor(Math.random() * 200)}`
-}
-
-/**
- * Provision a brand-new node: fresh RADIUS username/password, new static IP.
- * This is the «خرید نود جدید» path and never reuses an existing subscription.
- */
-export async function purchaseVpnService(plan: VpnPlan): Promise<ActiveService> {
-  await sleep(320)
-
-  const now = new Date()
-  const suffix = randomToken(6, USERNAME_ALPHABET)
-
-  return {
-    id: `svc_${suffix}`,
-    orderId: `ord_${suffix}`,
-    planName: plan.name,
-    location: plan.location,
-    countryCode: plan.countryCode || 'DE',
-    ipAddress: nextStaticIp(),
-    protocol: 'OpenVPN (UDP)',
-    username: `varnet_${randomToken(8, USERNAME_ALPHABET)}`,
-    password: randomToken(14, PASSWORD_ALPHABET),
-    dataCapGb: plan.dataCapGb ?? 50,
-    usedGb: 0,
-    startedAt: now.toISOString(),
-    expiresAt: new Date(now.getTime() + plan.durationDays * DAY_MS).toISOString(),
-    autoRenew: false,
-  }
-}
-
-/**
- * Renew an existing node: add the plan's duration and volume while keeping the
- * same RADIUS username, password and static IP. This is the «تمدید» path.
- */
-export async function renewVpnService(
-  service: ActiveService,
-  plan: VpnPlan,
-): Promise<ActiveService> {
-  await sleep(320)
-
-  const currentExpiry = new Date(service.expiresAt).getTime()
-  const anchor = Number.isFinite(currentExpiry) ? Math.max(Date.now(), currentExpiry) : Date.now()
-  const suffix = randomToken(6, USERNAME_ALPHABET)
-
-  return {
-    ...service,
-    orderId: `ord_${suffix}`,
-    planName: plan.name,
-    location: plan.location,
-    countryCode: plan.countryCode || service.countryCode,
-    dataCapGb: service.dataCapGb + (plan.dataCapGb ?? 50),
-    expiresAt: new Date(anchor + plan.durationDays * DAY_MS).toISOString(),
-  }
+  return (await listStaticIpNodes()).map(mapNodeToServer)
 }
 
 /* -------------------------------------------------------------------------- */

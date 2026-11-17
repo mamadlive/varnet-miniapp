@@ -28,6 +28,14 @@ export const endpoints = {
   /** Public card-to-card destination configured by the admin. */
   bank: '/api/bank',
 
+  /** Static-IP storefront backed by D1 `static_ip_nodes` / `orders`. */
+  staticIp: {
+    /** Enabled nodes only (public). */
+    nodes: '/api/static-ip/nodes',
+    /** Completed `vpn` orders of the signed-in customer. */
+    services: '/api/static-ip/services',
+  },
+
   admin: {
     users: '/api/admin/users',
     /** Manual wallet top-up / deduction (admin only). */
@@ -42,6 +50,9 @@ export const endpoints = {
     receiptAction: '/api/admin/receipts/action',
     /** Card destination persisted in D1 `settings`. */
     bank: '/api/admin/settings/bank',
+    /** Static-IP node catalogue management. */
+    staticIpNodes: '/api/admin/static-ip/nodes',
+    staticIpNodeAction: '/api/admin/static-ip/nodes/action',
   },
 
   vpn: {

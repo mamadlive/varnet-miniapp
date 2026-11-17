@@ -68,15 +68,18 @@ function profileFilename(username: string): string {
   return `varnet-${safe}.ovpn`
 }
 
-/** Generate the profile and hand it to the browser as a file download. */
-export function downloadOpenVpnProfile(input: OpenVpnProfileInput): void {
-  const profile = buildOpenVpnProfile(input)
-  const blob = new Blob([profile], { type: 'application/x-openvpn-profile' })
+/** Hand arbitrary config text to the browser as a file download. */
+export function downloadTextFile(
+  content: string,
+  filename: string,
+  mimeType = 'text/plain;charset=utf-8',
+): void {
+  const blob = new Blob([content], { type: mimeType })
   const url = URL.createObjectURL(blob)
   const anchor = document.createElement('a')
 
   anchor.href = url
-  anchor.download = profileFilename(input.username)
+  anchor.download = filename
   anchor.rel = 'noopener'
   document.body.appendChild(anchor)
   anchor.click()
@@ -84,4 +87,15 @@ export function downloadOpenVpnProfile(input: OpenVpnProfileInput): void {
 
   // Revoke after the browser has started reading the blob.
   window.setTimeout(() => URL.revokeObjectURL(url), 1_000)
+}
+
+/** True when the admin-delivered note is already an OpenVPN client profile. */
+export function looksLikeOpenVpnProfile(text: string): boolean {
+  return /\bclient\b/i.test(text) && /\bremote\s+\S+/i.test(text)
+}
+
+/** Generate the profile and hand it to the browser as a file download. */
+export function downloadOpenVpnProfile(input: OpenVpnProfileInput): void {
+  const profile = buildOpenVpnProfile(input)
+  downloadTextFile(profile, profileFilename(input.username), 'application/x-openvpn-profile')
 }

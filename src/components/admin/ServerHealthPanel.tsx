@@ -1,26 +1,42 @@
 import { ArrowLeft, Server } from 'lucide-react'
 import { Link } from 'react-router-dom'
-import { LoadBar } from '@/components/admin/LoadBar'
-import { StatusDot } from '@/components/admin/StatusBadges'
+import { Badge } from '@/components/ui/Badge'
+import type { BadgeTone } from '@/components/ui'
 import { Card } from '@/components/ui/Card'
 import { EmptyState } from '@/components/ui/EmptyState'
 import { Skeleton } from '@/components/ui/Skeleton'
-import { formatCount } from '@/lib/format'
-import type { VpnServer } from '@/types'
+import { formatCurrency } from '@/lib/format'
+import type { StaticIpNode, StaticIpNodeAvailability } from '@/types'
+
+const AVAILABILITY_LABELS: Record<StaticIpNodeAvailability, string> = {
+  in_stock: 'موجود',
+  coming_soon: 'به‌زودی',
+  sold_out: 'ناموجود',
+}
+
+const AVAILABILITY_TONES: Record<StaticIpNodeAvailability, BadgeTone> = {
+  in_stock: 'success',
+  coming_soon: 'info',
+  sold_out: 'neutral',
+}
 
 export interface ServerHealthPanelProps {
-  servers: VpnServer[]
+  nodes: StaticIpNode[]
   loading?: boolean
 }
 
-/** Compact VPN node health list for the dashboard's end column. */
-export function ServerHealthPanel({ servers, loading = false }: ServerHealthPanelProps) {
+/** Compact catalogue list of D1 static-IP nodes for the dashboard's end column. */
+export function ServerHealthPanel({ nodes, loading = false }: ServerHealthPanelProps) {
+  const visible = nodes.filter((node) => node.enabled)
+
   return (
     <Card padded={false} className="p-5">
       <div className="flex items-start justify-between gap-3">
         <div>
-          <h2 className="text-[15px] font-semibold text-tg-text">سلامت سرورها</h2>
-          <p className="mt-0.5 text-[12px] text-tg-hint">بارگذاری لحظه‌ای نودهای آی‌پی ثابت</p>
+          <h2 className="text-[15px] font-semibold text-tg-text">نودهای آی‌پی ثابت</h2>
+          <p className="mt-0.5 text-[12px] text-tg-hint">
+            نودهای فعال فروشگاه ({visible.length} از {nodes.length})
+          </p>
         </div>
         <Link
           to="/admin/vpn-servers"
@@ -37,38 +53,37 @@ export function ServerHealthPanel({ servers, loading = false }: ServerHealthPane
             <div key={index} className="space-y-2">
               <div className="flex items-center justify-between gap-3">
                 <Skeleton className="h-3.5 w-32" />
-                <Skeleton className="h-3 w-12" />
+                <Skeleton className="h-5 w-14 rounded-full" />
               </div>
-              <Skeleton className="h-1.5 w-full" />
+              <Skeleton className="h-3 w-24" />
             </div>
           ))}
         </div>
-      ) : servers.length === 0 ? (
+      ) : nodes.length === 0 ? (
         <EmptyState
           icon={Server}
-          title="هیچ سروری متصل نیست"
-          description="برای پایش بار، یک نود آی‌پی ثابت اضافه کنید."
+          title="هنوز نودی ثبت نشده"
+          description="برای شروع فروش آی‌پی ثابت، یک نود در بخش مدیریت اضافه کنید."
           className="py-8"
         />
       ) : (
         <div className="mt-2 divide-y divide-tg-separator">
-          {servers.map((server) => (
-            <div key={server.id} className="py-3.5 first:pt-2 last:pb-0">
+          {nodes.map((node) => (
+            <div key={node.id} className="py-3.5 first:pt-2 last:pb-0">
               <div className="flex items-center justify-between gap-3">
-                <div className="flex min-w-0 items-center gap-2.5">
-                  <StatusDot status={server.status} />
-                  <div className="min-w-0">
-                    <p className="truncate text-[13px] font-medium text-tg-text">{server.name}</p>
-                    <p className="truncate text-[11px] text-tg-hint">
-                      {server.country} · <span className="bidi-ltr">{server.protocol}</span>
-                    </p>
-                  </div>
+                <div className="min-w-0">
+                  <p className="truncate text-[13px] font-medium text-tg-text">{node.name}</p>
+                  <p className="truncate text-[11px] text-tg-hint">
+                    {node.country} · <span className="bidi-ltr">{node.ip}</span>
+                  </p>
                 </div>
-                <span className="shrink-0 text-[11px] font-medium tabular-nums text-tg-hint">
-                  {formatCount(server.activeClients)}/{formatCount(server.maxClients)}
-                </span>
+                <Badge tone={AVAILABILITY_TONES[node.availability]} size="sm">
+                  {node.enabled ? AVAILABILITY_LABELS[node.availability] : 'مخفی'}
+                </Badge>
               </div>
-              <LoadBar value={server.load} showValue className="mt-2" />
+              <p className="mt-1 text-[11px] font-medium tabular-nums text-tg-hint">
+                {formatCurrency(node.price, node.currency)}
+              </p>
             </div>
           ))}
         </div>

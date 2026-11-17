@@ -22,7 +22,6 @@ import {
 } from '@/components/marketplace'
 import type { MarketplaceTab, PurchaseTarget } from '@/components/marketplace'
 import { OpenVpnNotice } from '@/components/miniapp/OpenVpnNotice'
-import { VpnDeliverySheet } from '@/components/miniapp/VpnDeliverySheet'
 import { WalletPill } from '@/components/miniapp/WalletPill'
 import { Button } from '@/components/ui/Button'
 import { Card } from '@/components/ui/Card'
@@ -138,7 +137,6 @@ export default function HomePage() {
   const [plansFailed, setPlansFailed] = useState(false)
   const [reloadKey, setReloadKey] = useState(0)
   const [pendingPurchase, setPendingPurchase] = useState<PendingPurchase | null>(null)
-  const [delivery, setDelivery] = useState<{ planTitle: string } | null>(null)
   const [toast, setToast] = useState<PurchaseTarget | null>(null)
   const toastTimer = useRef<number | null>(null)
 
@@ -247,11 +245,6 @@ export default function HomePage() {
   const handlePurchaseConfirm = useCallback(
     (target: PurchaseTarget) => {
       setPendingPurchase(null)
-
-      if (plans.some((plan) => plan.id === target.id)) {
-        setDelivery({ planTitle: target.title })
-        return
-      }
 
       setToast(target)
       if (toastTimer.current !== null) window.clearTimeout(toastTimer.current)
@@ -488,10 +481,10 @@ export default function HomePage() {
               <Zap className="mt-0.5 size-3.5 shrink-0 text-brand-500" aria-hidden />
               <span>
                 <span className="font-semibold text-tg-text">
-                  تحویل تقریباً فوری پس از تایید پرداخت.
+                  تحویل کانفیگ پس از تایید پرداخت.
                 </span>{' '}
-                نام کاربری و رمز روی تونل امن OpenVPN (UDP) به‌صورت خودکار تزریق و پروفایل شما در
-                بخش سفارش‌ها تحویل داده می‌شود.
+                پس از تکمیل سفارش توسط پشتیبانی، فایل کانفیگ OpenVPN در بخش «سرویس‌های من»
+                قابل دانلود می‌شود.
               </span>
             </p>
           </div>
@@ -531,12 +524,6 @@ export default function HomePage() {
         kind={pendingPurchase?.kind}
         onConfirm={handlePurchaseConfirm}
         onCancel={handlePurchaseCancel}
-      />
-
-      <VpnDeliverySheet
-        open={delivery !== null}
-        planTitle={delivery?.planTitle ?? ''}
-        onClose={() => setDelivery(null)}
       />
     </div>
   )

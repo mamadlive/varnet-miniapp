@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useState } from 'react'
 import { Check, Copy, CreditCard, Landmark, Plus, Sparkles, Wallet } from 'lucide-react'
 
 import { Button } from '@/components/ui/Button'
@@ -12,10 +12,9 @@ import { fetchBankDetails, submitWalletReceipt } from '@/services/payments.servi
 import { useAuthStore } from '@/store/authStore'
 import type { BankAccountDetails, Currency } from '@/types'
 
-const PRESET_AMOUNTS = [100_000, 250_000, 500_000, 1_000_000] as const
+const PRESET_AMOUNTS = [100_000, 250_000, 500_000] as const
 const MIN_AMOUNT = 10_000
 const MAX_AMOUNT = 10_000_000
-const DEFAULT_PRESET = 250_000
 
 type TopUpMethod = 'instant' | 'card'
 
@@ -60,8 +59,7 @@ export function TopUpSheet({
   currency = 'IRT',
   loading = false,
 }: TopUpSheetProps) {
-  const [preset, setPreset] = useState<number | null>(DEFAULT_PRESET)
-  const [custom, setCustom] = useState('')
+  const [amountInput, setAmountInput] = useState('')
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [copiedField, setCopiedField] = useState<'card' | 'holder' | null>(null)
@@ -117,33 +115,26 @@ export function TopUpSheet({
     }
   }
 
-  const customValue = useMemo(() => {
-    const trimmed = custom.trim()
-    if (trimmed === '') return null
-    const parsed = Number.parseFloat(trimmed)
-    return Number.isFinite(parsed) ? parsed : null
-  }, [custom])
-
-  const amount = customValue ?? preset
-  const hasCustom = custom.trim() !== ''
-  const customInvalid =
-    hasCustom && (customValue === null || customValue < MIN_AMOUNT || customValue > MAX_AMOUNT)
+  const parsedAmount = Number(amountInput.trim())
+  const amount =
+    amountInput.trim() !== '' && Number.isInteger(parsedAmount) ? parsedAmount : null
+  const amountInvalid =
+    amountInput.trim() !== '' &&
+    (amount === null || amount < MIN_AMOUNT || amount > MAX_AMOUNT)
   const valid = amount !== null && amount >= MIN_AMOUNT && amount <= MAX_AMOUNT
   const busy = submitting || loading
 
   const reset = () => {
-    setPreset(DEFAULT_PRESET)
-    setCustom('')
+    setAmountInput('')
     setSubmitting(false)
     setError(null)
     setCopiedField(null)
     setReference('')
   }
 
-  const handlePreset = (value: number) => {
+  const selectAmount = (value: number) => {
     haptic()
-    setPreset(value)
-    setCustom('')
+    setAmountInput(String(value))
     setError(null)
   }
 
@@ -230,20 +221,50 @@ export function TopUpSheet({
       }
     >
       <div className="space-y-4">
-        <div>
-          <p className="mb-2 text-[13px] font-medium text-tg-hint">مبلغ</p>
-          <div className="grid grid-cols-4 gap-2">
+        <div className="space-y-2">
+          <Input
+            label="مبلغ شارژ (تومان)"
+            type="number"
+            inputMode="numeric"
+            min={MIN_AMOUNT}
+            max={MAX_AMOUNT}
+            step="1000"
+            required
+            placeholder="مبلغ دقیق واریزی، مثلاً 250000"
+            value={amountInput}
+            onChange={(event) => {
+              setAmountInput(event.target.value)
+              setError(null)
+            }}
+            error={
+              amountInvalid
+                ? `مبلغی بین ${formatCurrency(MIN_AMOUNT, currency)} و ${formatCurrency(MAX_AMOUNT, currency)} وارد کنید.`
+                : undefined
+            }
+            hint={
+              amountInvalid
+                ? undefined
+                : 'همان مبلغی که به کارت مقصد واریز می‌کنید را دقیق وارد کنید.'
+            }
+            trailing={
+              <span className="shrink-0 text-[12px] font-medium text-tg-hint">
+                {currencyLabel(currency)}
+              </span>
+            }
+          />
+
+          <div className="grid grid-cols-3 gap-2">
             {PRESET_AMOUNTS.map((value) => {
-              const active = !hasCustom && preset === value
+              const active = amount === value
               return (
                 <button
                   key={value}
                   type="button"
                   aria-pressed={active}
-                  aria-label={`افزایش موجودی به مبلغ ${formatCurrency(value, currency)}`}
-                  onClick={() => handlePreset(value)}
+                  aria-label={`انتخاب مبلغ ${formatCurrency(value, currency)}`}
+                  onClick={() => selectAmount(value)}
                   className={cn(
-                    'h-12 rounded-xl border text-[13px] font-semibold tabular-nums transition-colors duration-150',
+                    'h-11 rounded-xl border text-[13px] font-semibold tabular-nums transition-colors duration-150',
                     active
                       ? 'border-brand-500 bg-brand-500/10 text-brand-600'
                       : 'border-tg-separator bg-tg-bg text-tg-text hover:bg-tg-secondary-bg',
@@ -258,26 +279,6 @@ export function TopUpSheet({
             })}
           </div>
         </div>
-
-        <Input
-          label="مبلغ دلخواه"
-          type="number"
-          inputMode="numeric"
-          min={MIN_AMOUNT}
-          max={MAX_AMOUNT}
-          step="1000"
-          placeholder="مثلاً 200000"
-          value={custom}
-          onChange={(event) => setCustom(event.target.value)}
-          error={
-            customInvalid
-              ? `مبلغی بین ${formatCurrency(MIN_AMOUNT, currency)} و ${formatCurrency(MAX_AMOUNT, currency)} وارد کنید.`
-              : undefined
-          }
-          trailing={
-            <span className="shrink-0 text-[12px] font-medium text-tg-hint">{currencyLabel(currency)}</span>
-          }
-        />
 
         <div className="space-y-2">
           <p className="text-[13px] font-medium text-tg-hint">روش پرداخت</p>

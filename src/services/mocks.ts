@@ -1,6 +1,5 @@
 import type {
   AccountProduct,
-  ActiveService,
   AdminStats,
   Broadcast,
   Coupon,
@@ -9,8 +8,6 @@ import type {
   TelegramUser,
   Transaction,
   User,
-  VpnPlan,
-  VpnServer,
   Wallet,
 } from '@/types'
 import type { ProfitMargin } from '@/lib/pricing'
@@ -19,8 +16,8 @@ import type { ProfitMargin } from '@/lib/pricing'
  * Local demo data.
  *
  * Digital accounts, wallet and admin views are served from here until the
- * third-party provider proxy exists. The VPN catalogue and provisioning talk
- * to the Linux RADIUS API directly (`src/services/vpn.service.ts`).
+ * third-party provider proxy exists. The static-IP catalogue lives in the D1
+ * `static_ip_nodes` table and is managed from the admin panel.
  */
 
 const iso = (daysAgo: number, hoursAgo = 0): string =>
@@ -257,249 +254,6 @@ export const mockCoupons: Coupon[] = [
 ]
 
 /* -------------------------------------------------------------------------- */
-/* Static IP VPN                                                              */
-/* -------------------------------------------------------------------------- */
-
-export const mockVpnServers: VpnServer[] = [
-  {
-    id: 'srv_fra',
-    name: 'گره فرانکفورت',
-    hostname: 'fra-01.ip.varnet.internal',
-    ip: '185.220.101.42',
-    country: 'آلمان',
-    countryCode: 'DE',
-    protocol: 'OpenVPN (UDP)',
-    status: 'online',
-    load: 42,
-    activeClients: 84,
-    maxClients: 200,
-    createdAt: iso(420),
-  },
-  {
-    id: 'srv_lon',
-    name: 'گره لندن',
-    hostname: 'lon-01.ip.varnet.internal',
-    ip: '51.140.22.18',
-    country: 'انگلیس',
-    countryCode: 'GB',
-    protocol: 'OpenVPN (UDP)',
-    status: 'coming_soon',
-    load: 0,
-    activeClients: 0,
-    maxClients: 200,
-    createdAt: iso(24),
-  },
-  {
-    id: 'srv_par',
-    name: 'گره پاریس',
-    hostname: 'par-01.ip.varnet.internal',
-    ip: '51.138.44.91',
-    country: 'فرانسه',
-    countryCode: 'FR',
-    protocol: 'OpenVPN (UDP)',
-    status: 'coming_soon',
-    load: 0,
-    activeClients: 0,
-    maxClients: 200,
-    createdAt: iso(21),
-  },
-  {
-    id: 'srv_nyc',
-    name: 'گره نیویورک',
-    hostname: 'nyc-01.ip.varnet.internal',
-    ip: '104.208.77.36',
-    country: 'آمریکا',
-    countryCode: 'US',
-    protocol: 'OpenVPN (UDP)',
-    status: 'coming_soon',
-    load: 0,
-    activeClients: 0,
-    maxClients: 200,
-    createdAt: iso(15),
-  },
-  {
-    id: 'srv_tor',
-    name: 'گره تورنتو',
-    hostname: 'tor-01.ip.varnet.internal',
-    ip: '20.151.63.204',
-    country: 'کانادا',
-    countryCode: 'CA',
-    protocol: 'OpenVPN (UDP)',
-    status: 'coming_soon',
-    load: 0,
-    activeClients: 0,
-    maxClients: 200,
-    createdAt: iso(12),
-  },
-  {
-    id: 'srv_ams',
-    name: 'گره آمستردام',
-    hostname: 'ams-01.ip.varnet.internal',
-    ip: '193.27.13.87',
-    country: 'هلند',
-    countryCode: 'NL',
-    protocol: 'OpenVPN (UDP)',
-    status: 'coming_soon',
-    load: 0,
-    activeClients: 0,
-    maxClients: 200,
-    createdAt: iso(9),
-  },
-]
-
-/**
- * Only Germany has capacity right now. The other locations are already listed
- * so customers can see what is coming next; they are not purchasable.
- */
-export const mockVpnPlans: VpnPlan[] = [
-  {
-    id: 'vpn_fra_30',
-    name: 'آی‌پی ثابت اختصاصی · آلمان',
-    serverId: 'srv_fra',
-    location: 'آلمان',
-    countryCode: 'DE',
-    price: 150_000,
-    currency: 'IRT',
-    durationDays: 30,
-    bandwidthMbps: 1_000,
-    dataCapGb: 50,
-    staticIp: true,
-    stock: 6,
-    isActive: true,
-    availability: 'in_stock',
-    features: [
-      'آی‌پی ثابت اختصاصی',
-      'تونل امن OpenVPN (UDP)',
-      'نام کاربری و رمز تزریق‌شده',
-      '۵۰ گیگابایت حجم',
-      '۳۰ روز اعتبار',
-    ],
-    pingMs: 18,
-  },
-  {
-    id: 'vpn_gb_30',
-    name: 'آی‌پی ثابت اختصاصی · انگلیس',
-    serverId: 'srv_lon',
-    location: 'انگلیس',
-    countryCode: 'GB',
-    price: 185_000,
-    currency: 'IRT',
-    durationDays: 30,
-    bandwidthMbps: 1_000,
-    dataCapGb: 50,
-    staticIp: true,
-    stock: 0,
-    isActive: false,
-    availability: 'coming_soon',
-    features: ['آی‌پی ثابت اختصاصی', 'تونل امن OpenVPN (UDP)', '۵۰ گیگابایت حجم'],
-  },
-  {
-    id: 'vpn_fr_30',
-    name: 'آی‌پی ثابت اختصاصی · فرانسه',
-    serverId: 'srv_par',
-    location: 'فرانسه',
-    countryCode: 'FR',
-    price: 175_000,
-    currency: 'IRT',
-    durationDays: 30,
-    bandwidthMbps: 1_000,
-    dataCapGb: 50,
-    staticIp: true,
-    stock: 0,
-    isActive: false,
-    availability: 'coming_soon',
-    features: ['آی‌پی ثابت اختصاصی', 'تونل امن OpenVPN (UDP)', '۵۰ گیگابایت حجم'],
-  },
-  {
-    id: 'vpn_us_30',
-    name: 'آی‌پی ثابت اختصاصی · آمریکا',
-    serverId: 'srv_nyc',
-    location: 'آمریکا',
-    countryCode: 'US',
-    price: 210_000,
-    currency: 'IRT',
-    durationDays: 30,
-    bandwidthMbps: 1_000,
-    dataCapGb: 50,
-    staticIp: true,
-    stock: 0,
-    isActive: false,
-    availability: 'coming_soon',
-    features: ['آی‌پی ثابت اختصاصی', 'تونل امن OpenVPN (UDP)', '۵۰ گیگابایت حجم'],
-  },
-  {
-    id: 'vpn_ca_30',
-    name: 'آی‌پی ثابت اختصاصی · کانادا',
-    serverId: 'srv_tor',
-    location: 'کانادا',
-    countryCode: 'CA',
-    price: 205_000,
-    currency: 'IRT',
-    durationDays: 30,
-    bandwidthMbps: 1_000,
-    dataCapGb: 50,
-    staticIp: true,
-    stock: 0,
-    isActive: false,
-    availability: 'coming_soon',
-    features: ['آی‌پی ثابت اختصاصی', 'تونل امن OpenVPN (UDP)', '۵۰ گیگابایت حجم'],
-  },
-  {
-    id: 'vpn_nl_30',
-    name: 'آی‌پی ثابت اختصاصی · هلند',
-    serverId: 'srv_ams',
-    location: 'هلند',
-    countryCode: 'NL',
-    price: 180_000,
-    currency: 'IRT',
-    durationDays: 30,
-    bandwidthMbps: 1_000,
-    dataCapGb: 50,
-    staticIp: true,
-    stock: 0,
-    isActive: false,
-    availability: 'coming_soon',
-    features: ['آی‌پی ثابت اختصاصی', 'تونل امن OpenVPN (UDP)', '۵۰ گیگابایت حجم'],
-  },
-]
-
-/** Demo subscriptions rendered by the «سرویس‌های من» tracker. */
-export const mockActiveServices: ActiveService[] = [
-  {
-    id: 'svc_1001',
-    orderId: 'ord_2041',
-    planName: 'آی‌پی ثابت اختصاصی · آلمان',
-    location: 'آلمان',
-    countryCode: 'DE',
-    ipAddress: '185.220.101.42',
-    protocol: 'OpenVPN (UDP)',
-    username: 'varnet_de_1a2b3c',
-    password: 'N5f8Kq2Lm7Rt',
-    dataCapGb: 50,
-    usedGb: 12.4,
-    startedAt: iso(11),
-    expiresAt: inDays(19),
-    autoRenew: true,
-  },
-  {
-    id: 'svc_1002',
-    orderId: 'ord_2039',
-    planName: 'آی‌پی ثابت اختصاصی · آلمان',
-    location: 'آلمان',
-    countryCode: 'DE',
-    ipAddress: '185.220.101.57',
-    protocol: 'OpenVPN (UDP)',
-    username: 'varnet_de_9f8e7d',
-    password: 'J3wT6pYz9Bc4',
-    dataCapGb: 10,
-    usedGb: 8.5,
-    startedAt: iso(28),
-    expiresAt: inDays(2),
-    autoRenew: false,
-  },
-]
-
-/* -------------------------------------------------------------------------- */
 /* Wallet & orders                                                            */
 /* -------------------------------------------------------------------------- */
 
@@ -599,7 +353,7 @@ export const mockSupportTickets: SupportTicket[] = [
       {
         id: 'msg_1',
         author: 'user',
-        body: 'سلام، از دیروز سرعت تونل امن روی نود آلمان کم شده است. آی‌پی من 185.220.101.42 است. می‌شود بررسی کنید؟',
+        body: 'سلام، از دیروز سرعت تونل امن روی نود آلمان کم شده است. می‌شود بررسی کنید؟',
         createdAt: iso(0, 6),
       },
       {

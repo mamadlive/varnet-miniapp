@@ -3,7 +3,7 @@ import type { AutoMarginTier } from '@/lib/pricing'
 import { ApiError, apiGetProxy, apiPostProxy } from '@/services/apiClient'
 import { getAdminSessionToken } from '@/services/adminAuth.service'
 import { endpoints } from '@/services/endpoints'
-import { mockAdminStats, mockRevenueSeries, mockVpnServers } from '@/services/mocks'
+import { mockAdminStats, mockRevenueSeries } from '@/services/mocks'
 import { getTelegramInitData } from '@/services/telegram'
 import type {
   AdminStats,
@@ -12,8 +12,9 @@ import type {
   PaymentReceipt,
   PaymentReceiptStatus,
   RevenuePoint,
+  StaticIpNode,
+  StaticIpNodeAvailability,
   User,
-  VpnServer,
 } from '@/types'
 
 /**
@@ -208,7 +209,48 @@ export async function saveBankSettings(
   return { ...payload.data, updatedAt: payload.data.updatedAt ?? null }
 }
 
-export async function listAdminServers(): Promise<VpnServer[]> {
-  await sleep(200)
-  return mockVpnServers
+export interface StaticIpNodeInput {
+  /** Omit to create a new node. */
+  id?: string
+  name: string
+  ip: string
+  country: string
+  countryCode: string
+  price: number
+  durationDays: number
+  dataCapGb: number
+  availability: StaticIpNodeAvailability
+  enabled?: boolean
+  sortOrder?: number
+}
+
+export async function listAdminNodes(): Promise<StaticIpNode[]> {
+  const nodes = await adminGet<StaticIpNode[]>(endpoints.admin.staticIpNodes)
+  if (!Array.isArray(nodes)) throw new ApiError('فهرست نودهای آی‌پی ثابت نامعتبر بود.')
+  return nodes
+}
+
+/** Flip a node between enabled (visible in the Mini App) and hidden. */
+export async function toggleAdminNode(nodeId: string): Promise<StaticIpNode> {
+  const payload = await apiPostProxy<AdminEnvelope<StaticIpNode>>(
+    endpoints.admin.staticIpNodeAction,
+    { action: 'toggle', nodeId },
+    { headers: adminHeaders() },
+  )
+  if (!payload || payload.success !== true || !payload.data) {
+    throw adminFailure(payload, 'تغییر وضعیت نود انجام نشد.')
+  }
+  return payload.data
+}
+
+export async function saveAdminNode(input: StaticIpNodeInput): Promise<StaticIpNode> {
+  const payload = await apiPostProxy<AdminEnvelope<StaticIpNode>>(
+    endpoints.admin.staticIpNodeAction,
+    { action: 'save', ...input },
+    { headers: adminHeaders() },
+  )
+  if (!payload || payload.success !== true || !payload.data) {
+    throw adminFailure(payload, 'ذخیره نود انجام نشد.')
+  }
+  return payload.data
 }

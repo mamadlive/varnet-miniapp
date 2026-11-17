@@ -149,6 +149,42 @@ export interface ActiveService {
   autoRenew: boolean
 }
 
+/** Static-IP node managed from the admin panel (`static_ip_nodes`). */
+export type StaticIpNodeAvailability = 'in_stock' | 'coming_soon' | 'sold_out'
+
+export interface StaticIpNode {
+  id: string
+  name: string
+  ip: string
+  country: string
+  countryCode: string
+  protocol: string
+  price: number
+  currency: Currency
+  durationDays: number
+  dataCapGb: number
+  availability: StaticIpNodeAvailability
+  /** When false the node is hidden from the Mini App storefront. */
+  enabled: boolean
+  sortOrder: number
+  createdAt: string
+  updatedAt: string
+}
+
+/** A completed `vpn` order exposed to the customer as an active service. */
+export interface PurchasedStaticIpService {
+  id: string
+  orderId: string
+  planName: string
+  /** Admin-recorded OpenVPN profile / credentials; null until completed with details. */
+  deliveryNote: string | null
+  amount: number
+  currency: Currency
+  purchasedAt: string
+  completedAt: string
+}
+
+
 /* -------------------------------------------------------------------------- */
 /* Discounts & pricing                                                        */
 /* -------------------------------------------------------------------------- */

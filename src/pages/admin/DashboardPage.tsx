@@ -26,9 +26,9 @@ import {
   fetchAdminStats,
   fetchRevenueSeries,
   listAdminOrders,
-  listAdminServers,
+  listAdminNodes,
 } from '@/services/admin.service'
-import type { AdminStats, Order, RevenuePoint, VpnServer } from '@/types'
+import type { AdminStats, Order, RevenuePoint, StaticIpNode } from '@/types'
 
 const RECENT_ORDER_COLUMNS: DataTableColumn<Order>[] = [
   {
@@ -78,7 +78,7 @@ export default function DashboardPage() {
   const [stats, setStats] = useState<AdminStats | null>(null)
   const [revenue, setRevenue] = useState<RevenuePoint[]>([])
   const [orders, setOrders] = useState<Order[]>([])
-  const [servers, setServers] = useState<VpnServer[]>([])
+  const [nodes, setNodes] = useState<StaticIpNode[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
 
@@ -88,12 +88,12 @@ export default function DashboardPage() {
         fetchAdminStats(),
         fetchRevenueSeries(),
         listAdminOrders(),
-        listAdminServers(),
+        listAdminNodes(),
       ])
       setStats(statsData)
       setRevenue(revenueData)
       setOrders(ordersData)
-      setServers(serversData)
+      setNodes(serversData)
     } catch (err) {
       setError(err instanceof Error ? err.message : 'بارگیری داشبورد ممکن نشد.')
     } finally {
@@ -115,13 +115,13 @@ export default function DashboardPage() {
           fetchAdminStats(),
           fetchRevenueSeries(),
           listAdminOrders(),
-          listAdminServers(),
+          listAdminNodes(),
         ])
         if (cancelled) return
         setStats(statsData)
         setRevenue(revenueData)
         setOrders(ordersData)
-        setServers(serversData)
+        setNodes(serversData)
       } catch (err) {
         if (!cancelled) setError(err instanceof Error ? err.message : 'بارگیری داشبورد ممکن نشد.')
       } finally {
@@ -268,7 +268,7 @@ export default function DashboardPage() {
               />
             </div>
             <div className="min-w-0 xl:col-span-1">
-              <ServerHealthPanel servers={servers} loading={loading && servers.length === 0} />
+              <ServerHealthPanel nodes={nodes} loading={loading && nodes.length === 0} />
             </div>
           </section>
         </>
