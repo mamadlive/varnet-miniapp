@@ -12,6 +12,7 @@ import {
 } from '../../_lib/telegram'
 import {
   failure,
+  internalFailure,
   isAdminAllowed,
   jsonResponse,
   loadTelegramProfile,
@@ -84,15 +85,23 @@ async function isThrottled(context: PagesContext, ip: string, now: number): Prom
   }
 }
 
-export async function onRequestPost(context: PagesContext): Promise<Response> {
-  const { env } = context
+async function handleVerifyOtp(context: PagesContext): Promise<Response> {
+  const env = context.env ?? {}
 
   const botToken = env.TELEGRAM_BOT_TOKEN?.trim()
   if (!botToken) {
-    return failure(500, 'SERVER_NOT_CONFIGURED', 'توکن ربات تلگرام در تنظیمات سرور موجود نیست.')
+    return failure(
+      500,
+      'TELEGRAM_CONFIG_MISSING',
+      'تنظیمات تلگرام روی سرور یافت نشد: TELEGRAM_BOT_TOKEN تعریف نشده است.',
+    )
   }
   if (!env.DB) {
-    return failure(503, 'DB_NOT_CONFIGURED', 'اتصال پایگاه‌داده D1 در سرور تنظیم نشده است.')
+    return failure(
+      503,
+      'DB_NOT_CONFIGURED',
+      'اتصال پایگاه‌داده D1 در سرور تنظیم نشده است (binding با نام DB).',
+    )
   }
 
   let body: { code?: unknown } = {}
@@ -208,4 +217,12 @@ export async function onRequestPost(context: PagesContext): Promise<Response> {
       },
     },
   })
+}
+
+export async function onRequestPost(context: PagesContext): Promise<Response> {
+  try {
+    return await handleVerifyOtp(context)
+  } catch (cause) {
+    return internalFailure(cause, 'VERIFY_OTP_FAILED')
+  }
 }

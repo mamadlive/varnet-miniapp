@@ -18,6 +18,43 @@ function formatCountdown(seconds: number): string {
   return `${minutes}:${String(rest).padStart(2, '0')}`
 }
 
+interface FailureDetails {
+  message: string
+  code: string | null
+  detail: string | null
+}
+
+/**
+ * Turn a rejected request into what the red box shows: the server's Persian
+ * `message`, its `code`, and the optional raw `error.cause` diagnostics.
+ * Never falls back to the raw axios text when the server answered.
+ */
+function describeFailure(cause: unknown, fallback: string): FailureDetails {
+  if (!isApiError(cause)) {
+    return {
+      message: cause instanceof Error ? cause.message : fallback,
+      code: null,
+      detail: null,
+    }
+  }
+
+  const details = cause.details as
+    | { error?: { message?: unknown; cause?: unknown } }
+    | undefined
+  const nested = details?.error
+  const nestedCause = typeof nested?.cause === 'string' ? nested.cause.trim() : ''
+  const nestedMessage =
+    typeof nested?.message === 'string' && nested.message.trim() !== cause.message.trim()
+      ? nested.message.trim()
+      : ''
+
+  return {
+    message: cause.message || fallback,
+    code: cause.code ?? null,
+    detail: nestedCause || nestedMessage || null,
+  }
+}
+
 /**
  * Desktop `/admin/login` — the only way into the web panel outside Telegram.
  *
@@ -45,6 +82,7 @@ export default function AdminLoginPage() {
   const [cooldown, setCooldown] = useState(0)
   const [error, setError] = useState<string | null>(null)
   const [errorCode, setErrorCode] = useState<string | null>(null)
+  const [errorDetail, setErrorDetail] = useState<string | null>(null)
   const [notice, setNotice] = useState<string | null>(null)
 
   const redirectTo = useMemo(() => {
@@ -85,6 +123,7 @@ export default function AdminLoginPage() {
     setSending(true)
     setError(null)
     setErrorCode(null)
+    setErrorDetail(null)
     try {
       const result = await requestOtp()
       setStep('verify')
@@ -93,10 +132,13 @@ export default function AdminLoginPage() {
         'کد ۶ رقمی به تلگرام مدیر ارسال شد. اعتبار کد ۵ دقیقه است — کد را در همین صفحه وارد کنید.',
       )
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : 'ارسال کد تایید انجام نشد.')
-      setErrorCode(isApiError(cause) ? (cause.code ?? null) : null)
+      const described = describeFailure(cause, 'ارسال کد تایید انجام نشد.')
+      setError(described.message)
+      setErrorCode(described.code)
+      setErrorDetail(described.detail)
       const retryAfter = isApiError(cause)
-        ? (cause.details as { retryAfterSeconds?: unknown } | undefined)?.retryAfterSeconds
+        ? ((cause.details as { data?: { retryAfterSeconds?: unknown } } | undefined)?.data
+            ?.retryAfterSeconds ?? (cause.details as { retryAfterSeconds?: unknown } | undefined)?.retryAfterSeconds)
         : undefined
       if (typeof retryAfter === 'number' && retryAfter > 0) setCooldown(retryAfter)
     } finally {
@@ -109,12 +151,15 @@ export default function AdminLoginPage() {
     setVerifying(true)
     setError(null)
     setErrorCode(null)
+    setErrorDetail(null)
     try {
       await verifyOtp(code)
       enterPanel()
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : 'بررسی کد تایید انجام نشد.')
-      setErrorCode(isApiError(cause) ? (cause.code ?? null) : null)
+      const described = describeFailure(cause, 'بررسی کد تایید انجام نشد.')
+      setError(described.message)
+      setErrorCode(described.code)
+      setErrorDetail(described.detail)
     } finally {
       setVerifying(false)
     }
@@ -127,6 +172,7 @@ export default function AdminLoginPage() {
     setNotice(null)
     setError(null)
     setErrorCode(null)
+    setErrorDetail(null)
   }
 
   const checking = Boolean(token) && (status === 'idle' || status === 'checking')
@@ -246,6 +292,11 @@ export default function AdminLoginPage() {
                 {errorCode ? (
                   <p className="text-[11px] text-tg-hint">
                     کد خطا: <span className="bidi-ltr">{errorCode}</span>
+                  </p>
+                ) : null}
+                {errorDetail ? (
+                  <p className="text-[11px] leading-relaxed text-rose-500/90">
+                    جزئیات: <span className="bidi-ltr break-words">{errorDetail}</span>
                   </p>
                 ) : null}
               </div>

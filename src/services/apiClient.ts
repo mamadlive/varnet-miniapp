@@ -187,6 +187,10 @@ function extractMessage(error: AxiosError): string {
     const payload = data as { detail?: unknown; message?: unknown; error?: unknown }
     if (typeof payload.message === 'string') return payload.message
     if (typeof payload.error === 'string') return payload.error
+    if (payload.error && typeof payload.error === 'object') {
+      const nested = payload.error as { message?: unknown }
+      if (typeof nested.message === 'string' && nested.message.trim()) return nested.message
+    }
     if (typeof payload.detail === 'string') return payload.detail
     if (Array.isArray(payload.detail)) {
       const first = payload.detail[0] as FastApiValidationDetail | undefined
@@ -196,6 +200,18 @@ function extractMessage(error: AxiosError): string {
 
   if (error.code === 'ECONNABORTED') return 'زمان درخواست به پایان رسید. دوباره تلاش کنید.'
   if (error.code === 'ERR_NETWORK') return 'خطای شبکه — ارتباط با سرور برقرار نشد.'
+
+  // Gateway-level failures (Cloudflare 502/504) carry no JSON body; never show
+  // the raw "Request failed with status code 502" axios text to the user.
+  const status = error.response?.status
+  if (status === 502) {
+    return 'سرور پاسخ معتبری برنگرداند (۵۰۲). چند لحظه بعد دوباره تلاش کنید.'
+  }
+  if (status === 504) return 'پاسخی از سرور دریافت نشد (۵۰۴). دوباره تلاش کنید.'
+  if (typeof status === 'number' && status >= 500) {
+    return `خطای داخلی سرور (کد ${status}). دوباره تلاش کنید.`
+  }
+  if (status === 429) return 'تعداد درخواست‌ها بیش از حد مجاز است. کمی بعد تلاش کنید.'
 
   return error.message || 'خطای شبکه‌ای غیرمنتظره رخ داد.'
 }

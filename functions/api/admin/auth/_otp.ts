@@ -52,6 +52,19 @@ interface TelegramApiResponse {
   error_code?: number
 }
 
+/** Carries the Bot API's own `description`/`error_code` to the HTTP response. */
+export class TelegramSendError extends Error {
+  readonly description: string
+  readonly errorCode: number | null
+
+  constructor(description: string, errorCode: number | null = null) {
+    super(description)
+    this.name = 'TelegramSendError'
+    this.description = description
+    this.errorCode = errorCode
+  }
+}
+
 /**
  * Send a plain-text message through the Bot API. Throws with the provider's
  * description on failure — callers must surface it, never swallow it.
@@ -78,9 +91,18 @@ export async function sendTelegramMessage(
     payload = null
   }
 
-  if (!response.ok || payload?.ok !== true) {
-    const detail = payload?.description || `HTTP ${response.status}`
-    throw new Error(detail)
+  if (!response.ok) {
+    throw new TelegramSendError(
+      payload?.description?.trim() || `Telegram HTTP ${response.status}`,
+      payload?.error_code ?? response.status,
+    )
+  }
+
+  if (payload?.ok !== true) {
+    throw new TelegramSendError(
+      payload?.description?.trim() || 'پاسخ تلگرام تأیید ارسال پیام را نداشت.',
+      payload?.error_code ?? null,
+    )
   }
 }
 

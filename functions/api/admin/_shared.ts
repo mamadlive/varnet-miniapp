@@ -87,6 +87,41 @@ export function failure(status: number, code: string, message: string, extra?: u
   return jsonResponse({ success: false, code, message, ...(extra ? { data: extra } : {}) }, status)
 }
 
+function describeCause(cause: unknown): string | null {
+  if (cause === undefined || cause === null) return null
+  if (cause instanceof Error) return cause.message || cause.name
+  if (typeof cause === 'string') return cause
+  try {
+    return JSON.stringify(cause)
+  } catch {
+    return String(cause)
+  }
+}
+
+/**
+ * Catch-all for unexpected exceptions: always answers with valid JSON so the
+ * worker never dies with an opaque 502/HTML error page. The client relies on
+ * `message` (Persian, user-facing) and `error.cause` (raw diagnostic).
+ */
+export function internalFailure(cause: unknown, code = 'INTERNAL_ERROR'): Response {
+  const message =
+    cause instanceof Error && cause.message
+      ? cause.message
+      : 'خطای داخلی سرور رخ داد. دوباره تلاش کنید.'
+  return jsonResponse(
+    {
+      success: false,
+      code,
+      message,
+      error: {
+        message: cause instanceof Error ? cause.message || cause.name : String(cause),
+        cause: cause instanceof Error ? describeCause(cause.cause) : null,
+      },
+    },
+    500,
+  )
+}
+
 async function hasAdminRole(db: D1Database, telegramId: number): Promise<boolean> {
   try {
     const row = await db
