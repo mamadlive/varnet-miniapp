@@ -32,7 +32,9 @@ export const endpoints = {
   staticIp: {
     /** Enabled nodes only (public). */
     nodes: '/api/static-ip/nodes',
-    /** Completed `vpn` orders of the signed-in customer. */
+    /** Enabled selling plans joined to enabled nodes (public). */
+    plans: '/api/static-ip/plans',
+    /** Pending / paid / completed `vpn` orders of the signed-in customer. */
     services: '/api/static-ip/services',
   },
 
@@ -53,6 +55,9 @@ export const endpoints = {
     /** Static-IP node catalogue management. */
     staticIpNodes: '/api/admin/static-ip/nodes',
     staticIpNodeAction: '/api/admin/static-ip/nodes/action',
+    /** Static-IP selling plan management (full CRUD). */
+    staticIpPlans: '/api/admin/static-ip/plans',
+    staticIpPlanAction: '/api/admin/static-ip/plans/action',
   },
 
   vpn: {

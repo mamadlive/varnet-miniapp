@@ -14,6 +14,7 @@ import type {
   RevenuePoint,
   StaticIpNode,
   StaticIpNodeAvailability,
+  StaticIpPlan,
   User,
 } from '@/types'
 
@@ -253,4 +254,59 @@ export async function saveAdminNode(input: StaticIpNodeInput): Promise<StaticIpN
     throw adminFailure(payload, 'ذخیره نود انجام نشد.')
   }
   return payload.data
+}
+
+export interface StaticIpPlanInput {
+  /** Omit to create a new plan. */
+  id?: string
+  nodeId: string
+  name: string
+  dataCapGb: number
+  durationDays: number
+  price: number
+  enabled?: boolean
+  sortOrder?: number
+}
+
+export async function listAdminPlans(): Promise<StaticIpPlan[]> {
+  const plans = await adminGet<StaticIpPlan[]>(endpoints.admin.staticIpPlans)
+  if (!Array.isArray(plans)) throw new ApiError('فهرست پلن‌های آی‌پی ثابت نامعتبر بود.')
+  return plans
+}
+
+export async function saveAdminPlan(input: StaticIpPlanInput): Promise<StaticIpPlan> {
+  const payload = await apiPostProxy<AdminEnvelope<StaticIpPlan>>(
+    endpoints.admin.staticIpPlanAction,
+    { action: 'save', ...input },
+    { headers: adminHeaders() },
+  )
+  if (!payload || payload.success !== true || !payload.data) {
+    throw adminFailure(payload, 'ذخیره پلن انجام نشد.')
+  }
+  return payload.data
+}
+
+/** Flip a plan between enabled (sellable in the Mini App) and hidden. */
+export async function toggleAdminPlan(planId: string): Promise<StaticIpPlan> {
+  const payload = await apiPostProxy<AdminEnvelope<StaticIpPlan>>(
+    endpoints.admin.staticIpPlanAction,
+    { action: 'toggle', planId },
+    { headers: adminHeaders() },
+  )
+  if (!payload || payload.success !== true || !payload.data) {
+    throw adminFailure(payload, 'تغییر وضعیت پلن انجام نشد.')
+  }
+  return payload.data
+}
+
+export async function deleteAdminPlan(planId: string): Promise<string> {
+  const payload = await apiPostProxy<AdminEnvelope<{ id: string }>>(
+    endpoints.admin.staticIpPlanAction,
+    { action: 'delete', planId },
+    { headers: adminHeaders() },
+  )
+  if (!payload || payload.success !== true || !payload.data) {
+    throw adminFailure(payload, 'حذف پلن انجام نشد.')
+  }
+  return payload.data.id
 }

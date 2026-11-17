@@ -35,7 +35,7 @@ const STATUS_ORDER: OrderStatus[] = [
 ]
 
 function canComplete(order: Order): boolean {
-  return order.status === 'paid' || order.status === 'provisioning'
+  return order.status === 'pending' || order.status === 'paid' || order.status === 'provisioning'
 }
 
 function canReject(order: Order): boolean {
@@ -146,7 +146,7 @@ function buildColumns(
               leftIcon={<CheckCircle2 className="size-3.5" />}
               onClick={() => onComplete(order)}
             >
-              تایید و تکمیل
+              تایید و تحویل
             </Button>
           ) : null}
           {canReject(order) ? (
@@ -248,7 +248,7 @@ export default function OrdersPage() {
       )
       setFeedback(
         actionState.action === 'complete'
-          ? 'سفارش تکمیل شد و اطلاعات تحویل برای کاربر ثبت گردید.'
+          ? 'سفارش تایید و تحویل شد و اطلاعات تحویل برای کاربر ثبت گردید.'
           : 'سفارش رد شد و در صورت پرداخت، مبلغ به کیف پول کاربر برگشت.',
       )
       setActionState(null)
@@ -401,7 +401,7 @@ export default function OrdersPage() {
       <Sheet
         open={actionState !== null}
         onClose={closeAction}
-        title={isComplete ? 'تایید و تکمیل سفارش' : 'رد سفارش و بازگشت وجه'}
+        title={isComplete ? 'تایید و تحویل سفارش' : 'رد سفارش و بازگشت وجه'}
         description={
           actionState
             ? `سفارش ${actionState.order.id} · ${formatCurrency(actionState.order.total, actionState.order.currency)}`
@@ -421,7 +421,7 @@ export default function OrdersPage() {
               onClick={submitAction}
               leftIcon={isComplete ? <CheckCircle2 className="size-4" /> : <Undo2 className="size-4" />}
             >
-              {isComplete ? 'تایید و تکمیل سفارش' : 'رد سفارش و بازگشت وجه'}
+              {isComplete ? 'تایید و تحویل سفارش' : 'رد سفارش و بازگشت وجه'}
             </Button>
             <Button fullWidth variant="secondary" disabled={actionBusy} onClick={closeAction}>
               {fa.common.cancel}
@@ -443,7 +443,8 @@ export default function OrdersPage() {
               className="w-full rounded-xl border border-tg-separator bg-tg-bg p-3 text-[12.5px] leading-relaxed text-tg-text outline-none focus:border-brand-500"
             />
             <p className="text-[11px] leading-relaxed text-tg-hint">
-              سفارش به وضعیت «تحویل شد» تغییر می‌کند و همین متن برای مشتری قابل مشاهده خواهد بود.
+              سفارش مستقیماً به وضعیت «تحویل شد» تغییر می‌کند و همین متن برای مشتری قابل مشاهده
+              خواهد بود. برای سفارش‌های کارت‌به‌کارت، تایید این مرحله به‌منزله تایید فیش واریز است.
             </p>
           </div>
         ) : (

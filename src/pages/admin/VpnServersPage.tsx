@@ -2,10 +2,12 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import {
   CalendarDays,
   EyeOff,
+  Package,
   Pencil,
   Plus,
   RefreshCw,
   Server,
+  Trash2,
 } from 'lucide-react'
 import { AdminErrorState } from '@/components/admin/AdminStates'
 import { AdminPageHeader } from '@/components/admin/AdminPageHeader'
@@ -21,8 +23,16 @@ import { Switch } from '@/components/ui/Switch'
 import { formatCount, formatCurrency, formatDate } from '@/lib/format'
 import { fa } from '@/lib/i18n'
 import { cn } from '@/lib/utils'
-import { listAdminNodes, saveAdminNode, toggleAdminNode } from '@/services/admin.service'
-import type { StaticIpNode, StaticIpNodeAvailability } from '@/types'
+import {
+  deleteAdminPlan,
+  listAdminNodes,
+  listAdminPlans,
+  saveAdminNode,
+  saveAdminPlan,
+  toggleAdminNode,
+  toggleAdminPlan,
+} from '@/services/admin.service'
+import type { StaticIpNode, StaticIpNodeAvailability, StaticIpPlan } from '@/types'
 
 const AVAILABILITY_LABELS: Record<StaticIpNodeAvailability, string> = {
   in_stock: 'موجود',
@@ -112,6 +122,53 @@ function validateForm(form: NodeForm): string | null {
   return null
 }
 
+interface PlanForm {
+  nodeId: string
+  name: string
+  dataCapGb: string
+  durationDays: string
+  price: string
+  enabled: boolean
+}
+
+const EMPTY_PLAN_FORM: PlanForm = {
+  nodeId: '',
+  name: '',
+  dataCapGb: '50',
+  durationDays: '30',
+  price: '150000',
+  enabled: true,
+}
+
+function planFormFromPlan(plan: StaticIpPlan): PlanForm {
+  return {
+    nodeId: plan.nodeId,
+    name: plan.name,
+    dataCapGb: String(plan.dataCapGb),
+    durationDays: String(plan.durationDays),
+    price: String(plan.price),
+    enabled: plan.enabled,
+  }
+}
+
+function validatePlanForm(form: PlanForm): string | null {
+  if (!form.nodeId) return 'نود متصل به پلن را انتخاب کنید.'
+  if (form.name.trim().length < 2 || form.name.trim().length > 80) {
+    return 'نام پلن باید بین ۲ تا ۸۰ نویسه باشد.'
+  }
+  const price = Number(form.price)
+  if (!Number.isInteger(price) || price < 0) return 'قیمت پلن باید عدد صحیح (تومان) باشد.'
+  const duration = Number(form.durationDays)
+  if (!Number.isInteger(duration) || duration < 1 || duration > 3650) {
+    return 'مدت پلن باید بین ۱ تا ۳۶۵۰ روز باشد.'
+  }
+  const quota = Number(form.dataCapGb)
+  if (!Number.isInteger(quota) || quota < 1 || quota > 100_000) {
+    return 'حجم پلن باید عدد صحیح (گیگابایت) باشد.'
+  }
+  return null
+}
+
 export default function VpnServersPage() {
   const [nodes, setNodes] = useState<StaticIpNode[]>([])
   const [loading, setLoading] = useState(true)
@@ -123,6 +180,17 @@ export default function VpnServersPage() {
   const [form, setForm] = useState<NodeForm>(EMPTY_FORM)
   const [saving, setSaving] = useState(false)
   const [formError, setFormError] = useState<string | null>(null)
+
+  const [plans, setPlans] = useState<StaticIpPlan[]>([])
+  const [plansLoading, setPlansLoading] = useState(true)
+  const [planEditing, setPlanEditing] = useState<StaticIpPlan | null>(null)
+  const [planCreating, setPlanCreating] = useState(false)
+  const [planForm, setPlanForm] = useState<PlanForm>(EMPTY_PLAN_FORM)
+  const [planSaving, setPlanSaving] = useState(false)
+  const [planFormError, setPlanFormError] = useState<string | null>(null)
+  const [planTogglingId, setPlanTogglingId] = useState<string | null>(null)
+  const [planDeleting, setPlanDeleting] = useState<StaticIpPlan | null>(null)
+  const [planDeleteBusy, setPlanDeleteBusy] = useState(false)
 
   const load = useCallback(async () => {
     try {
@@ -154,6 +222,25 @@ export default function VpnServersPage() {
   }, [])
 
   useEffect(() => {
+    let cancelled = false
+    listAdminPlans()
+      .then((data) => {
+        if (!cancelled) setPlans(data)
+      })
+      .catch((err: unknown) => {
+        if (!cancelled) {
+          setNotice(err instanceof Error ? err.message : 'بارگیری پلن‌های فروش ممکن نشد.')
+        }
+      })
+      .finally(() => {
+        if (!cancelled) setPlansLoading(false)
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [])
+
+  useEffect(() => {
     if (!notice) return
     const timer = window.setTimeout(() => setNotice(null), 4200)
     return () => window.clearTimeout(timer)
@@ -162,7 +249,14 @@ export default function VpnServersPage() {
   const refresh = useCallback(() => {
     setError(null)
     setLoading(true)
+    setPlansLoading(true)
     void load()
+    listAdminPlans()
+      .then((data) => setPlans(data))
+      .catch((err: unknown) => {
+        setNotice(err instanceof Error ? err.message : 'بارگیری پلن‌های فروش ممکن نشد.')
+      })
+      .finally(() => setPlansLoading(false))
   }, [load])
 
   const summary = useMemo(() => {
@@ -256,17 +350,112 @@ export default function VpnServersPage() {
   const patchForm = (patch: Partial<NodeForm>) =>
     setForm((previous) => ({ ...previous, ...patch }))
 
+  const openPlanCreate = () => {
+    setPlanForm({ ...EMPTY_PLAN_FORM, nodeId: nodes[0]?.id ?? '' })
+    setPlanFormError(null)
+    setPlanEditing(null)
+    setPlanCreating(true)
+  }
+
+  const openPlanEdit = (plan: StaticIpPlan) => {
+    setPlanForm(planFormFromPlan(plan))
+    setPlanFormError(null)
+    setPlanEditing(plan)
+    setPlanCreating(false)
+  }
+
+  const closePlanSheet = () => {
+    if (planSaving) return
+    setPlanEditing(null)
+    setPlanCreating(false)
+    setPlanFormError(null)
+  }
+
+  const planSheetOpen = planEditing !== null || planCreating
+
+  const patchPlanForm = (patch: Partial<PlanForm>) =>
+    setPlanForm((previous) => ({ ...previous, ...patch }))
+
+  const handlePlanToggle = async (plan: StaticIpPlan) => {
+    if (planTogglingId) return
+    setPlanTogglingId(plan.id)
+    try {
+      const updated = await toggleAdminPlan(plan.id)
+      setPlans((previous) => previous.map((item) => (item.id === updated.id ? updated : item)))
+      setNotice(
+        updated.enabled
+          ? 'پلن فعال شد و در مینی‌اپ قابل خرید است.'
+          : 'پلن غیرفعال شد و از مینی‌اپ مخفی شد.',
+      )
+    } catch (err) {
+      setNotice(err instanceof Error ? err.message : 'تغییر وضعیت پلن انجام نشد.')
+    } finally {
+      setPlanTogglingId(null)
+    }
+  }
+
+  const handlePlanSave = async () => {
+    if (planSaving) return
+    const validation = validatePlanForm(planForm)
+    if (validation) {
+      setPlanFormError(validation)
+      return
+    }
+
+    setPlanSaving(true)
+    setPlanFormError(null)
+    try {
+      const saved = await saveAdminPlan({
+        id: planEditing?.id,
+        nodeId: planForm.nodeId,
+        name: planForm.name.trim(),
+        dataCapGb: Number(planForm.dataCapGb),
+        durationDays: Number(planForm.durationDays),
+        price: Number(planForm.price),
+        enabled: planForm.enabled,
+      })
+      setPlans((previous) => {
+        const exists = previous.some((item) => item.id === saved.id)
+        return exists
+          ? previous.map((item) => (item.id === saved.id ? saved : item))
+          : [...previous, saved]
+      })
+      setPlanEditing(null)
+      setPlanCreating(false)
+      setNotice(planEditing ? 'تغییرات پلن ذخیره شد.' : 'پلن جدید ساخته شد.')
+    } catch (err) {
+      setPlanFormError(err instanceof Error ? err.message : 'ذخیره پلن انجام نشد.')
+    } finally {
+      setPlanSaving(false)
+    }
+  }
+
+  const handlePlanDelete = async () => {
+    if (!planDeleting || planDeleteBusy) return
+    setPlanDeleteBusy(true)
+    try {
+      const deletedId = await deleteAdminPlan(planDeleting.id)
+      setPlans((previous) => previous.filter((item) => item.id !== deletedId))
+      setPlanDeleting(null)
+      setNotice('پلن حذف شد و از فروشگاه مینی‌اپ برداشته شد.')
+    } catch (err) {
+      setNotice(err instanceof Error ? err.message : 'حذف پلن انجام نشد.')
+    } finally {
+      setPlanDeleteBusy(false)
+    }
+  }
+
   const isLoading = loading && nodes.length === 0
 
   return (
     <div className="space-y-6">
       <AdminPageHeader
         eyebrow="کاتالوگ"
-        title="نودهای آی‌پی ثابت"
-        description="نودهای فروشگاه آی‌پی ثابت را مدیریت کنید. نود غیرفعال در مینی‌اپ نمایش داده نمی‌شود."
+        title="آی‌پی ثابت · نودها و پلن‌ها"
+        description="پلن‌های فروش و نودهای فروشگاه آی‌پی ثابت را مدیریت کنید. هر مورد غیرفعال در مینی‌اپ نمایش داده نمی‌شود."
         meta={
           <Badge tone="brand" size="sm">
-            {formatCount(nodes.length)} نود
+            {formatCount(nodes.length)} نود · {formatCount(plans.length)} پلن
           </Badge>
         }
         actions={
@@ -280,8 +469,16 @@ export default function VpnServersPage() {
             >
               {fa.common.refresh}
             </Button>
-            <Button size="sm" leftIcon={<Plus className="size-4" />} onClick={openCreate}>
+            <Button
+              variant="secondary"
+              size="sm"
+              leftIcon={<Server className="size-4" />}
+              onClick={openCreate}
+            >
               نود جدید
+            </Button>
+            <Button size="sm" leftIcon={<Plus className="size-4" />} onClick={openPlanCreate}>
+              پلن جدید
             </Button>
           </>
         }
@@ -344,6 +541,138 @@ export default function VpnServersPage() {
             </Card>
           )}
 
+          <section className="space-y-3">
+            <div className="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
+              <div>
+                <h2 className="text-[15px] font-semibold text-tg-text">پلن‌های فروش</h2>
+                <p className="mt-0.5 text-[12px] leading-relaxed text-tg-hint">
+                  هر پلن یک محصول قابل خرید در مینی‌اپ است: حجم، مدت، قیمت و نود متصل را همین‌جا
+                  تعیین کنید.
+                </p>
+              </div>
+              <Button
+                variant="secondary"
+                size="sm"
+                leftIcon={<Plus className="size-4" />}
+                onClick={openPlanCreate}
+              >
+                پلن جدید
+              </Button>
+            </div>
+
+            {plansLoading ? (
+              <div className="grid gap-4 lg:grid-cols-2">
+                {Array.from({ length: 2 }).map((_, index) => (
+                  <Skeleton key={index} className="h-44 rounded-2xl" />
+                ))}
+              </div>
+            ) : plans.length === 0 ? (
+              <Card>
+                <EmptyState
+                  icon={Package}
+                  title="هنوز پلنی ساخته نشده"
+                  description="بدون پلن، فروشگاه آی‌پی ثابت در مینی‌اپ خالی می‌ماند. اولین پلن فروش را بسازید."
+                  className="py-8"
+                  action={
+                    <Button size="sm" leftIcon={<Plus className="size-4" />} onClick={openPlanCreate}>
+                      ساخت پلن
+                    </Button>
+                  }
+                />
+              </Card>
+            ) : (
+              <div className="grid gap-4 lg:grid-cols-2">
+                {plans.map((plan) => (
+                  <Card
+                    key={plan.id}
+                    className={cn('flex flex-col p-5', !plan.enabled && 'opacity-80')}
+                  >
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="min-w-0">
+                        <p className="truncate text-[14px] font-semibold text-tg-text">
+                          {plan.name}
+                        </p>
+                        <p className="mt-0.5 flex items-center gap-1.5 truncate text-[11px] text-tg-hint">
+                          <span aria-hidden>{countryFlag(plan.countryCode)}</span>
+                          <span className="truncate">{plan.nodeName}</span>
+                        </p>
+                      </div>
+                      <div className="flex shrink-0 flex-wrap justify-end gap-1.5">
+                        <Badge tone={plan.enabled ? 'success' : 'neutral'} size="sm">
+                          {plan.enabled ? 'قابل فروش' : 'غیرفعال'}
+                        </Badge>
+                        <Badge tone={AVAILABILITY_TONES[plan.availability]} size="sm">
+                          {AVAILABILITY_LABELS[plan.availability]}
+                        </Badge>
+                      </div>
+                    </div>
+
+                    <dl className="mt-4 grid grid-cols-3 gap-x-3 gap-y-2 rounded-xl bg-tg-secondary-bg/60 p-3">
+                      <div>
+                        <dt className="text-[10.5px] font-semibold text-tg-hint">قیمت</dt>
+                        <dd className="mt-0.5 truncate text-[12px] font-medium text-tg-text">
+                          {formatCurrency(plan.price, plan.currency)}
+                        </dd>
+                      </div>
+                      <div>
+                        <dt className="text-[10.5px] font-semibold text-tg-hint">حجم</dt>
+                        <dd className="mt-0.5 truncate text-[12px] text-tg-text">
+                          {formatCount(plan.dataCapGb)} گیگابایت
+                        </dd>
+                      </div>
+                      <div>
+                        <dt className="text-[10.5px] font-semibold text-tg-hint">مدت</dt>
+                        <dd className="mt-0.5 truncate text-[12px] text-tg-text">
+                          {formatCount(plan.durationDays)} روز
+                        </dd>
+                      </div>
+                    </dl>
+
+                    <div className="mt-3 flex items-center justify-between gap-2 border-t border-tg-separator pt-3">
+                      <label className="flex items-center gap-2 text-[11.5px] font-medium text-tg-hint">
+                        <Switch
+                          checked={plan.enabled}
+                          disabled={planTogglingId === plan.id}
+                          onCheckedChange={() => void handlePlanToggle(plan)}
+                          label={`فعال یا غیرفعال کردن ${plan.name}`}
+                        />
+                        نمایش در مینی‌اپ
+                      </label>
+                      <div className="flex items-center gap-1">
+                        <Button
+                          variant="secondary"
+                          size="sm"
+                          leftIcon={<Pencil className="size-3.5" />}
+                          onClick={() => openPlanEdit(plan)}
+                        >
+                          ویرایش
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          className="text-red-600 hover:bg-red-500/10"
+                          leftIcon={<Trash2 className="size-3.5" />}
+                          onClick={() => setPlanDeleting(plan)}
+                        >
+                          حذف
+                        </Button>
+                      </div>
+                    </div>
+                  </Card>
+                ))}
+              </div>
+            )}
+          </section>
+
+          <div className="flex items-end justify-between gap-3 pt-2">
+            <div>
+              <h2 className="text-[15px] font-semibold text-tg-text">نودها</h2>
+              <p className="mt-0.5 text-[12px] leading-relaxed text-tg-hint">
+                نود غیرفعال و پلن‌های متصل به آن از مینی‌اپ مخفی می‌شوند.
+              </p>
+            </div>
+          </div>
+
           {isLoading ? (
             <div className="grid gap-4 lg:grid-cols-2">
               {Array.from({ length: 4 }).map((_, index) => (
@@ -403,21 +732,19 @@ export default function VpnServersPage() {
 
                   <dl className="mt-4 grid grid-cols-2 gap-x-4 gap-y-3 rounded-xl bg-tg-secondary-bg/60 p-3 sm:grid-cols-3">
                     <div>
-                      <dt className="text-[11px] font-semibold text-tg-hint">قیمت</dt>
-                      <dd className="mt-0.5 truncate text-[12px] font-medium text-tg-text">
-                        {formatCurrency(node.price, node.currency)}
+                      <dt className="text-[11px] font-semibold text-tg-hint">نشانی IPv4</dt>
+                      <dd className="mt-0.5 truncate font-mono text-[12px] font-medium text-tg-text">
+                        <span className="bidi-ltr">{node.ip}</span>
                       </dd>
                     </div>
                     <div>
-                      <dt className="text-[11px] font-semibold text-tg-hint">مدت</dt>
-                      <dd className="mt-0.5 truncate text-[12px] text-tg-text">
-                        {formatCount(node.durationDays)} روز
-                      </dd>
+                      <dt className="text-[11px] font-semibold text-tg-hint">پروتکل</dt>
+                      <dd className="mt-0.5 truncate text-[12px] text-tg-text">{node.protocol}</dd>
                     </div>
                     <div>
-                      <dt className="text-[11px] font-semibold text-tg-hint">حجم</dt>
+                      <dt className="text-[11px] font-semibold text-tg-hint">پلن متصل</dt>
                       <dd className="mt-0.5 truncate text-[12px] text-tg-text">
-                        {formatCount(node.dataCapGb)} گیگابایت
+                        {formatCount(plans.filter((plan) => plan.nodeId === node.id).length)} پلن
                       </dd>
                     </div>
                   </dl>
@@ -582,6 +909,141 @@ export default function VpnServersPage() {
             />
           </div>
         </div>
+      </Sheet>
+
+      <Sheet
+        open={planSheetOpen}
+        onClose={closePlanSheet}
+        title={planEditing ? 'ویرایش پلن فروش' : 'پلن فروش جدید'}
+        description="حجم، مدت، قیمت و نود این پلن همان چیزی است که مشتری در مینی‌اپ می‌بیند و می‌خرد."
+        className="max-h-[92dvh] overflow-y-auto"
+        footer={
+          <div className="space-y-2">
+            {planFormError ? (
+              <p role="alert" className="rounded-xl border border-tg-destructive/25 bg-tg-destructive/10 px-3 py-2 text-[12px] font-medium leading-relaxed text-tg-destructive">
+                {planFormError}
+              </p>
+            ) : null}
+            <div className="grid grid-cols-2 gap-2">
+              <Button variant="secondary" disabled={planSaving} onClick={closePlanSheet}>
+                {fa.common.cancel}
+              </Button>
+              <Button loading={planSaving} onClick={() => void handlePlanSave()}>
+                ذخیره پلن
+              </Button>
+            </div>
+          </div>
+        }
+      >
+        <div className="space-y-3">
+          <div className="space-y-1.5">
+            <label htmlFor="plan-node" className="block text-[13px] font-medium text-tg-hint">
+              نود متصل
+            </label>
+            <select
+              id="plan-node"
+              value={planForm.nodeId}
+              onChange={(event) => patchPlanForm({ nodeId: event.target.value })}
+              className="h-11 w-full rounded-xl border border-tg-separator bg-tg-bg px-3 text-[15px] text-tg-text outline-none transition-colors focus:border-brand-500"
+            >
+              {nodes.length === 0 ? <option value="">نودی ثبت نشده است</option> : null}
+              {nodes.map((node) => (
+                <option key={node.id} value={node.id}>
+                  {node.name} · {node.ip}
+                </option>
+              ))}
+            </select>
+            {nodes.length === 0 ? (
+              <p className="text-[11px] text-tg-hint">
+                برای ساخت پلن ابتدا از بخش «نود جدید» یک نود بسازید.
+              </p>
+            ) : null}
+          </div>
+
+          <Input
+            label="نام پلن"
+            value={planForm.name}
+            onChange={(event) => patchPlanForm({ name: event.target.value })}
+            placeholder="پلن ۵۰ گیگابایت · ۱ ماهه"
+            maxLength={80}
+          />
+
+          <div className="grid grid-cols-2 gap-2">
+            <Input
+              label="حجم (گیگابایت)"
+              type="number"
+              inputMode="numeric"
+              min={1}
+              value={planForm.dataCapGb}
+              onChange={(event) => patchPlanForm({ dataCapGb: event.target.value })}
+            />
+            <Input
+              label="مدت (روز)"
+              type="number"
+              inputMode="numeric"
+              min={1}
+              max={3650}
+              value={planForm.durationDays}
+              onChange={(event) => patchPlanForm({ durationDays: event.target.value })}
+            />
+          </div>
+
+          <Input
+            label="قیمت (تومان)"
+            type="number"
+            inputMode="numeric"
+            min={0}
+            step={1000}
+            value={planForm.price}
+            onChange={(event) => patchPlanForm({ price: event.target.value })}
+          />
+
+          <div className="flex items-center justify-between gap-3 rounded-xl border border-tg-separator p-3">
+            <div className="min-w-0">
+              <p className="text-[12.5px] font-semibold text-tg-text">قابل فروش در مینی‌اپ</p>
+              <p className="mt-0.5 text-[11px] leading-relaxed text-tg-hint">
+                در صورت غیرفعال بودن، این پلن از فروشگاه مینی‌اپ مخفی می‌شود.
+              </p>
+            </div>
+            <Switch
+              checked={planForm.enabled}
+              onCheckedChange={(checked) => patchPlanForm({ enabled: checked })}
+              label="فروش پلن در مینی‌اپ"
+            />
+          </div>
+        </div>
+      </Sheet>
+
+      <Sheet
+        open={planDeleting !== null}
+        onClose={() => {
+          if (!planDeleteBusy) setPlanDeleting(null)
+        }}
+        title="حذف پلن فروش"
+        description={planDeleting ? `${planDeleting.name} · ${planDeleting.nodeName}` : undefined}
+        footer={
+          <div className="grid grid-cols-2 gap-2">
+            <Button
+              variant="secondary"
+              disabled={planDeleteBusy}
+              onClick={() => setPlanDeleting(null)}
+            >
+              {fa.common.cancel}
+            </Button>
+            <Button
+              variant="destructive"
+              loading={planDeleteBusy}
+              onClick={() => void handlePlanDelete()}
+            >
+              حذف پلن
+            </Button>
+          </div>
+        }
+      >
+        <p className="text-[13px] leading-relaxed text-tg-text">
+          این پلن از فروشگاه مینی‌اپ حذف می‌شود. سفارش‌های ثبت‌شده قبلی با عنوان پلن حفظ می‌شوند
+          و سرویس مشتریان تغییری نمی‌کند.
+        </p>
       </Sheet>
     </div>
   )

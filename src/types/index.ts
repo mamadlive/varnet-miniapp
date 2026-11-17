@@ -171,11 +171,35 @@ export interface StaticIpNode {
   updatedAt: string
 }
 
-/** A completed `vpn` order exposed to the customer as an active service. */
+/** A purchasable static-IP plan created by the admin (D1 `static_ip_plans`). */
+export interface StaticIpPlan {
+  id: string
+  nodeId: string
+  name: string
+  dataCapGb: number
+  durationDays: number
+  price: number
+  currency: Currency
+  enabled: boolean
+  sortOrder: number
+  nodeName: string
+  country: string
+  countryCode: string
+  protocol: string
+  availability: StaticIpNodeAvailability
+  createdAt: string
+  updatedAt: string
+}
+
+/** A `vpn` order exposed to the customer as a service. */
+export type PurchasedStaticIpServiceStatus = 'pending' | 'paid' | 'completed'
+
 export interface PurchasedStaticIpService {
   id: string
   orderId: string
   planName: string
+  /** Only `completed` services expose a downloadable config. */
+  status: PurchasedStaticIpServiceStatus
   /** Admin-recorded OpenVPN profile / credentials; null until completed with details. */
   deliveryNote: string | null
   amount: number

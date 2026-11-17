@@ -41,7 +41,8 @@ export function ActiveServiceCard({ service, onNotice, className }: ActiveServic
   const copyTimer = useRef<number | null>(null)
 
   const note = service.deliveryNote?.trim() ?? ''
-  const hasConfig = note.length > 0
+  const pendingDelivery = service.status !== 'completed'
+  const hasConfig = !pendingDelivery && note.length > 0
   const isProfile = hasConfig && looksLikeOpenVpnProfile(note)
 
   useEffect(
@@ -96,8 +97,8 @@ export function ActiveServiceCard({ service, onNotice, className }: ActiveServic
             <h3 dir="auto" className="truncate text-[14px] font-semibold text-tg-text">
               {service.planName}
             </h3>
-            <Badge tone="success" size="sm">
-              فعال
+            <Badge tone={pendingDelivery ? 'warning' : 'success'} size="sm">
+              {pendingDelivery ? 'در انتظار تحویل' : 'فعال'}
             </Badge>
           </div>
           <p className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[11px] text-tg-hint">
@@ -182,8 +183,9 @@ export function ActiveServiceCard({ service, onNotice, className }: ActiveServic
             >
               <AlertTriangle className="mt-0.5 size-4 shrink-0 text-amber-600" aria-hidden />
               <p className="text-[11.5px] font-medium leading-relaxed text-amber-700 dark:text-amber-400">
-                کانفیگ این سرویس هنوز توسط پشتیبانی ثبت نشده است. به‌محض تکمیل سفارش، فایل دانلود
-                در همین کارت فعال می‌شود.
+                {pendingDelivery
+                  ? 'در انتظار تایید و تحویل ادمین. به‌محض تکمیل سفارش، فایل کانفیگ در همین کارت فعال می‌شود.'
+                  : 'کانفیگ این سرویس هنوز توسط پشتیبانی ثبت نشده است. به‌محض تکمیل سفارش، فایل دانلود در همین کارت فعال می‌شود.'}
               </p>
             </div>
             <Button

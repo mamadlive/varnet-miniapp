@@ -1,4 +1,4 @@
-import { ArrowLeft, Clock, Gauge, MapPin, Signal } from 'lucide-react'
+import { ArrowLeft, Clock, Gauge, MapPin } from 'lucide-react'
 import type { LucideIcon } from 'lucide-react'
 import { CountryFlag } from '@/components/miniapp/CountryFlag'
 import { Badge, Button, Card, Skeleton } from '@/components/ui'
@@ -22,6 +22,12 @@ function Spec({ icon: Icon, label, value }: { icon: LucideIcon; label: string; v
 /** Persian label for a plan's bandwidth, e.g. «۱ گیگابیت» / «۵۰۰ مگابیت». */
 function bandwidthLabel(bandwidthMbps: number): string {
   return bandwidthMbps >= 1000 ? '۱ گیگابیت' : `${formatCount(bandwidthMbps)} مگابیت`
+}
+
+/** Quota of a plan, with the bandwidth suffix when the catalogue provides it. */
+function quotaLabel(plan: VpnPlan): string {
+  const quota = plan.dataCapGb ? `${formatCount(plan.dataCapGb)} گیگابایت` : '—'
+  return plan.bandwidthMbps ? `${quota} · ${bandwidthLabel(plan.bandwidthMbps)}` : quota
 }
 
 export interface VpnPlanCardProps {
@@ -94,17 +100,8 @@ export function VpnPlanCard({ plan, server, onSelect, className }: VpnPlanCardPr
           </Badge>
         </div>
 
-        <div className="mt-3.5 grid grid-cols-3 gap-2">
-          <Spec
-            icon={Gauge}
-            label="پهنای باند"
-            value={plan.bandwidthMbps ? bandwidthLabel(plan.bandwidthMbps) : '—'}
-          />
-          <Spec
-            icon={Signal}
-            label="پینگ"
-            value={plan.pingMs !== undefined ? `${formatCount(plan.pingMs)} میلی‌ثانیه` : '—'}
-          />
+        <div className="mt-3.5 grid grid-cols-2 gap-2">
+          <Spec icon={Gauge} label="حجم" value={quotaLabel(plan)} />
           <Spec icon={Clock} label="مدت" value={`${formatCount(plan.durationDays)} روز`} />
         </div>
       </div>

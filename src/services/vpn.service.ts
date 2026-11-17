@@ -1,6 +1,6 @@
 import { apiGet, apiPost } from '@/services/apiClient'
 import { endpoints } from '@/services/endpoints'
-import { listStaticIpNodes, mapNodeToPlan, mapNodeToServer } from '@/services/staticIp.service'
+import { listStaticIpNodes, listStaticIpPlans, mapPlanToVpnPlan, mapNodeToServer } from '@/services/staticIp.service'
 import type { VpnPlan, VpnServer } from '@/types'
 
 /* -------------------------------------------------------------------------- */
@@ -69,7 +69,7 @@ export type VpnCustomer = Record<string, unknown>
 
 /** Purchasable storefront catalogue — enabled D1 nodes only. */
 export async function listVpnPlans(): Promise<VpnPlan[]> {
-  return (await listStaticIpNodes()).map(mapNodeToPlan)
+  return (await listStaticIpPlans()).map(mapPlanToVpnPlan)
 }
 
 /** Node strip entries — same enabled D1 nodes, no local fixtures. */

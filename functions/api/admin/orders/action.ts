@@ -67,20 +67,35 @@ async function completeOrder(
   const db = context.env.DB!
   const now = new Date().toISOString()
 
-  if (order.status !== 'paid' && order.status !== 'provisioning') {
-    return failure(409, 'ORDER_NOT_PAYABLE', 'فقط سفارش پرداخت‌شده قابل تکمیل است.')
+  if (
+    order.status !== 'pending' &&
+    order.status !== 'paid' &&
+    order.status !== 'provisioning'
+  ) {
+    return failure(409, 'ORDER_NOT_PAYABLE', 'فقط سفارش در انتظار یا پرداخت‌شده قابل تایید و تحویل است.')
   }
 
-  const result = await db
-    .prepare(
-      `UPDATE orders
-       SET status = 'completed', delivery_note = ?, updated_at = ?
-       WHERE id = ? AND status IN ('paid', 'provisioning')`,
-    )
-    .bind(deliveryNote || order.product_title, now, order.id)
-    .run()
+  const batch = [
+    db
+      .prepare(
+        `UPDATE orders
+         SET status = 'completed', delivery_note = ?, updated_at = ?
+         WHERE id = ? AND status IN ('pending', 'paid', 'provisioning')`,
+      )
+      .bind(deliveryNote || order.product_title, now, order.id),
+    // Delivering a pending card-to-card order is the admin's approval of its receipt.
+    db
+      .prepare(
+        `UPDATE payment_receipts
+         SET status = 'APPROVED', updated_at = ?
+         WHERE order_id = ? AND purpose = 'product_purchase' AND status = 'PENDING'`,
+      )
+      .bind(now, order.id),
+  ]
 
-  if ((result.meta?.changes ?? 0) !== 1) {
+  const results = await db.batch(batch)
+
+  if ((results[0]?.meta?.changes ?? 0) !== 1) {
     return failure(409, 'ORDER_STATE_CHANGED', 'وضعیت سفارش تغییر کرده است؛ فهرست را به‌روز کنید.')
   }
 

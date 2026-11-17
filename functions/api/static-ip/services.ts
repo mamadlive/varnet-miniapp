@@ -1,9 +1,10 @@
 /**
  * Cloudflare Pages Function — GET /api/static-ip/services
  *
- * «سرویس‌های من» for static IP: every completed `kind = 'vpn'` order of the
- * signed-in customer, straight from D1. The admin's delivery note recorded on
- * completion is the config payload the Mini App offers for download.
+ * «سرویس‌های من» for static IP: every `kind = 'vpn'` order of the signed-in
+ * customer that is pending, paid or completed, straight from D1. The order
+ * status is exposed so the Mini App can gate the config download until the
+ * admin approves and delivers the service.
  */
 
 import { authenticateUser, userIdFor, type UserContext } from '../_lib/userAuth'
@@ -13,6 +14,7 @@ interface ServiceRow {
   product_title: string
   total: number
   currency: string
+  status: string
   delivery_note: string | null
   created_at: string
   updated_at: string | null
@@ -45,9 +47,10 @@ export async function onRequestGet(context: UserContext): Promise<Response> {
   try {
     const result = await db
       .prepare(
-        `SELECT id, product_title, total, currency, delivery_note, created_at, updated_at
+        `SELECT id, product_title, total, currency, status, delivery_note, created_at, updated_at
          FROM orders
-         WHERE user_id = ? AND kind = 'vpn' AND status = 'completed'
+         WHERE user_id = ? AND kind = 'vpn'
+           AND status IN ('pending', 'paid', 'completed')
          ORDER BY COALESCE(updated_at, created_at) DESC
          LIMIT ?`,
       )
@@ -64,6 +67,7 @@ export async function onRequestGet(context: UserContext): Promise<Response> {
       id: row.id,
       orderId: row.id,
       planName: row.product_title,
+      status: row.status,
       deliveryNote: row.delivery_note,
       amount: Number(row.total),
       currency: 'IRT',

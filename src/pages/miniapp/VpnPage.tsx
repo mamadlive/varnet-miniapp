@@ -366,8 +366,8 @@ export default function VpnPage() {
 
           <section className="mt-6">
             <SectionHeader
-              title="موقعیت را انتخاب کنید"
-              subtitle="فقط نودهای فعال‌شده توسط پشتیبانی نمایش داده می‌شوند"
+              title="پلن و موقعیت را انتخاب کنید"
+              subtitle="فقط پلن‌هایی که پشتیبانی فعال کرده است در این فهرست دیده می‌شوند"
             />
 
             {plansLoading ? (
@@ -381,7 +381,7 @@ export default function VpnPage() {
                 <EmptyState
                   icon={RefreshCw}
                   title="پلن‌ها در دسترس نیستند"
-                  description="دسترسی به فهرست نودهای آی‌پی ثابت ممکن نشد. اتصال خود را بررسی کنید و دوباره تلاش کنید."
+                  description="دسترسی به فهرست پلن‌های آی‌پی ثابت ممکن نشد. اتصال خود را بررسی کنید و دوباره تلاش کنید."
                   action={
                     <Button size="sm" variant="secondary" onClick={retryLoad}>
                       {fa.common.retry}
@@ -393,8 +393,8 @@ export default function VpnPage() {
               <Card variant="surface" padded={false}>
                 <EmptyState
                   icon={Server}
-                  title="نودی موجود نیست"
-                  description="در حال حاضر هیچ نودی توسط پشتیبانی فعال نشده است. نودهای جدید به‌طور منظم اضافه می‌شوند."
+                  title="پلنی برای فروش نیست"
+                  description="در حال حاضر هیچ پلن آی‌پی ثابتی توسط پشتیبانی فعال نشده است. پلن‌های جدید به‌طور منظم اضافه می‌شوند."
                   action={
                     <Button size="sm" variant="secondary" onClick={retryLoad}>
                       {fa.common.refresh}

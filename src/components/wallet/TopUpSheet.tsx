@@ -222,65 +222,6 @@ export function TopUpSheet({
     >
       <div className="space-y-4">
         <div className="space-y-2">
-          <Input
-            label="مبلغ شارژ (تومان)"
-            type="number"
-            inputMode="numeric"
-            min={MIN_AMOUNT}
-            max={MAX_AMOUNT}
-            step="1000"
-            required
-            placeholder="مبلغ دقیق واریزی، مثلاً 250000"
-            value={amountInput}
-            onChange={(event) => {
-              setAmountInput(event.target.value)
-              setError(null)
-            }}
-            error={
-              amountInvalid
-                ? `مبلغی بین ${formatCurrency(MIN_AMOUNT, currency)} و ${formatCurrency(MAX_AMOUNT, currency)} وارد کنید.`
-                : undefined
-            }
-            hint={
-              amountInvalid
-                ? undefined
-                : 'همان مبلغی که به کارت مقصد واریز می‌کنید را دقیق وارد کنید.'
-            }
-            trailing={
-              <span className="shrink-0 text-[12px] font-medium text-tg-hint">
-                {currencyLabel(currency)}
-              </span>
-            }
-          />
-
-          <div className="grid grid-cols-3 gap-2">
-            {PRESET_AMOUNTS.map((value) => {
-              const active = amount === value
-              return (
-                <button
-                  key={value}
-                  type="button"
-                  aria-pressed={active}
-                  aria-label={`انتخاب مبلغ ${formatCurrency(value, currency)}`}
-                  onClick={() => selectAmount(value)}
-                  className={cn(
-                    'h-11 rounded-xl border text-[13px] font-semibold tabular-nums transition-colors duration-150',
-                    active
-                      ? 'border-brand-500 bg-brand-500/10 text-brand-600'
-                      : 'border-tg-separator bg-tg-bg text-tg-text hover:bg-tg-secondary-bg',
-                  )}
-                >
-                  <span className="block leading-tight">{formatCount(value)}</span>
-                  <span className="block text-[10px] font-medium leading-tight opacity-70">
-                    {currencyLabel(currency)}
-                  </span>
-                </button>
-              )
-            })}
-          </div>
-        </div>
-
-        <div className="space-y-2">
           <p className="text-[13px] font-medium text-tg-hint">روش پرداخت</p>
 
           <button
@@ -421,6 +362,73 @@ export function TopUpSheet({
             <p>در حالت نمایشی، مبلغ فوراً به موجودی اضافه می‌شود.</p>
           </div>
         )}
+
+        <div className="space-y-2.5 rounded-2xl border border-brand-500/30 bg-brand-500/[0.05] p-3">
+          <div className="flex items-center justify-between gap-2">
+            <p className="text-[12.5px] font-semibold text-tg-text">مبلغ شارژ</p>
+            {valid && amount !== null ? (
+              <span className="text-[11px] font-medium tabular-nums text-brand-600">
+                {formatCurrency(amount, currency)}
+              </span>
+            ) : null}
+          </div>
+          <Input
+            label="مبلغ شارژ (تومان)"
+            type="number"
+            inputMode="numeric"
+            min={MIN_AMOUNT}
+            max={MAX_AMOUNT}
+            step="1000"
+            required
+            placeholder="مبلغ دقیق واریزی، مثلاً 250000"
+            value={amountInput}
+            onChange={(event) => {
+              setAmountInput(event.target.value)
+              setError(null)
+            }}
+            error={
+              amountInvalid
+                ? `مبلغی بین ${formatCurrency(MIN_AMOUNT, currency)} و ${formatCurrency(MAX_AMOUNT, currency)} وارد کنید.`
+                : undefined
+            }
+            hint={
+              amountInvalid
+                ? undefined
+                : 'همان مبلغی که به کارت مقصد واریز می‌کنید را دقیق وارد کنید.'
+            }
+            trailing={
+              <span className="shrink-0 text-[12px] font-medium text-tg-hint">
+                {currencyLabel(currency)}
+              </span>
+            }
+          />
+
+          <div className="grid grid-cols-3 gap-2">
+            {PRESET_AMOUNTS.map((value) => {
+              const active = amount === value
+              return (
+                <button
+                  key={value}
+                  type="button"
+                  aria-pressed={active}
+                  aria-label={`انتخاب مبلغ ${formatCurrency(value, currency)}`}
+                  onClick={() => selectAmount(value)}
+                  className={cn(
+                    'h-11 rounded-xl border text-[13px] font-semibold tabular-nums transition-colors duration-150',
+                    active
+                      ? 'border-brand-500 bg-brand-500/10 text-brand-600'
+                      : 'border-tg-separator bg-tg-bg text-tg-text hover:bg-tg-secondary-bg',
+                  )}
+                >
+                  <span className="block leading-tight">{formatCount(value)}</span>
+                  <span className="block text-[10px] font-medium leading-tight opacity-70">
+                    {currencyLabel(currency)}
+                  </span>
+                </button>
+              )
+            })}
+          </div>
+        </div>
       </div>
     </Sheet>
   )

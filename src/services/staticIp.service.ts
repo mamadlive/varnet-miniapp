@@ -5,14 +5,16 @@ import type {
   Currency,
   PurchasedStaticIpService,
   StaticIpNode,
+  StaticIpPlan,
   VpnPlan,
   VpnServer,
 } from '@/types'
 
 /**
  * Static-IP storefront reads D1 through Pages Functions only:
- * - `GET /api/static-ip/nodes`    → admin-managed catalogue (enabled nodes),
- * - `GET /api/static-ip/services` → the customer's completed `vpn` orders.
+ * - `GET /api/static-ip/plans`    → admin-managed selling plans,
+ * - `GET /api/static-ip/nodes`    → admin-managed node catalogue (enabled nodes),
+ * - `GET /api/static-ip/services` → the customer's pending/paid/completed `vpn` orders.
  * There are no local fixtures behind this surface.
  */
 
@@ -20,6 +22,12 @@ interface NodesEnvelope {
   success?: boolean
   message?: string
   data?: StaticIpNode[]
+}
+
+interface PlansEnvelope {
+  success?: boolean
+  message?: string
+  data?: StaticIpPlan[]
 }
 
 interface ServicesEnvelope {
@@ -41,6 +49,14 @@ export async function listStaticIpNodes(): Promise<StaticIpNode[]> {
   return payload.data
 }
 
+export async function listStaticIpPlans(): Promise<StaticIpPlan[]> {
+  const payload = await apiGetProxy<PlansEnvelope>(endpoints.staticIp.plans)
+  if (!payload || payload.success !== true || !Array.isArray(payload.data)) {
+    throw new Error(payload?.message || 'خواندن پلن‌های آی‌پی ثابت از سرور انجام نشد.')
+  }
+  return payload.data
+}
+
 export async function listPurchasedServices(): Promise<PurchasedStaticIpService[]> {
   const payload = await apiGetProxy<ServicesEnvelope>(endpoints.staticIp.services, {
     headers: authHeaders(),
@@ -51,26 +67,26 @@ export async function listPurchasedServices(): Promise<PurchasedStaticIpService[
   return payload.data
 }
 
-/** Admin node row → purchasable storefront plan. */
-export function mapNodeToPlan(node: StaticIpNode): VpnPlan {
-  const isActive = node.availability === 'in_stock'
+/** Admin plan row → purchasable storefront plan. */
+export function mapPlanToVpnPlan(plan: StaticIpPlan): VpnPlan {
+  const isActive = plan.enabled
   return {
-    id: node.id,
-    name: node.name,
-    serverId: node.id,
-    location: node.country,
-    countryCode: node.countryCode,
-    price: node.price,
-    currency: node.currency as Currency,
-    durationDays: node.durationDays,
-    dataCapGb: node.dataCapGb,
+    id: plan.id,
+    name: plan.name,
+    serverId: plan.nodeId,
+    location: plan.country,
+    countryCode: plan.countryCode,
+    price: plan.price,
+    currency: plan.currency as Currency,
+    durationDays: plan.durationDays,
+    dataCapGb: plan.dataCapGb,
     staticIp: true,
-    stock: isActive ? 999 : 0,
+    stock: plan.availability === 'in_stock' ? 999 : 0,
     isActive,
-    availability: node.availability,
+    availability: plan.availability,
     features: [
-      `${node.dataCapGb} گیگابایت حجم`,
-      `${node.durationDays} روز اعتبار`,
+      `${plan.dataCapGb} گیگابایت حجم`,
+      `${plan.durationDays} روز اعتبار`,
       'آی‌پی ثابت اختصاصی',
       'تونل امن OpenVPN (UDP)',
     ],
