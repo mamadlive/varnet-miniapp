@@ -36,6 +36,8 @@ export const endpoints = {
     plans: '/api/static-ip/plans',
     /** Pending / paid / completed `vpn` orders of the signed-in customer. */
     services: '/api/static-ip/services',
+    download: '/api/static-ip/download',
+    resend: '/api/static-ip/resend',
   },
 
   admin: {

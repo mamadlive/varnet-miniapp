@@ -138,6 +138,7 @@ export interface OrderActionResult {
   refunded?: number
   balance?: number | null
   updatedAt?: string
+  telegramDelivery?: { sent: boolean; code?: string; message?: string }
 }
 
 export async function actOnOrder(

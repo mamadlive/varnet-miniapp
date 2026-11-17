@@ -14,6 +14,7 @@
  * never credit the wallet twice.
  */
 
+import { sendVpnDocument, type TelegramDeliveryResult } from '../../_lib/staticIpDelivery'
 import {
   authenticateAdmin,
   failure,
@@ -213,6 +214,17 @@ async function completeOrder(
     return failure(409, 'ORDER_STATE_CHANGED', 'وضعیت سفارش تغییر کرده است؛ فهرست را به‌روز کنید.')
   }
 
+  let telegramDelivery: TelegramDeliveryResult | undefined
+  if (order.kind === 'vpn') {
+    try {
+      const user = await db.prepare('SELECT telegram_id FROM users WHERE id = ?')
+        .bind(order.user_id).first<{ telegram_id: number }>()
+      telegramDelivery = await sendVpnDocument(context.env.TELEGRAM_BOT_TOKEN, Number(user?.telegram_id), deliveryNote)
+    } catch {
+      telegramDelivery = { sent: false, code: 'TELEGRAM_USER_LOOKUP_FAILED', message: 'خواندن شناسه تلگرام مشتری انجام نشد. (TELEGRAM_USER_LOOKUP_FAILED)' }
+    }
+  }
+
   return jsonResponse({
     success: true,
     message: 'سفارش تکمیل شد و اطلاعات تحویل برای کاربر ثبت گردید.',
@@ -221,6 +233,7 @@ async function completeOrder(
       status: 'completed',
       deliveryNote,
       updatedAt: now,
+      telegramDelivery,
     },
   })
 }

@@ -194,6 +194,52 @@ export async function verifySessionToken(
   }
 }
 
+export async function createStaticIpDownloadToken(
+  telegramId: number,
+  orderId: string,
+  botToken: string,
+): Promise<string> {
+  const payload = base64UrlEncode(new TextEncoder().encode(JSON.stringify({
+    sub: telegramId,
+    orderId,
+    exp: Math.floor(Date.now() / 1000) + 120,
+  })))
+  const signature = base64UrlEncode(new Uint8Array(await hmacSha256(
+    new TextEncoder().encode(botToken),
+    `varnet-static-ip-download-v1.${payload}`,
+  )))
+  return `${payload}.${signature}`
+}
+
+export async function verifyStaticIpDownloadToken(
+  token: string,
+  orderId: string,
+  botToken: string,
+): Promise<number | null> {
+  const [payload, signature, extra] = token.split('.')
+  if (!payload || !signature || extra || token.length > 2048) return null
+  const expected = base64UrlEncode(new Uint8Array(await hmacSha256(
+    new TextEncoder().encode(botToken),
+    `varnet-static-ip-download-v1.${payload}`,
+  )))
+  if (!timingSafeEqual(expected, signature)) return null
+  const bytes = base64UrlDecode(payload)
+  if (!bytes) return null
+  try {
+    const data = JSON.parse(new TextDecoder().decode(bytes)) as {
+      sub?: unknown; orderId?: unknown; exp?: unknown
+    }
+    const now = Math.floor(Date.now() / 1000)
+    if (!Number.isSafeInteger(data.sub) || Number(data.sub) <= 0 || data.orderId !== orderId ||
+        !Number.isInteger(data.exp) || Number(data.exp) <= now || Number(data.exp) > now + 120) {
+      return null
+    }
+    return Number(data.sub)
+  } catch {
+    return null
+  }
+}
+
 /* -------------------------------------------------------------------------- */
 /* Admin web session (Telegram OTP login)                                     */
 /* -------------------------------------------------------------------------- */

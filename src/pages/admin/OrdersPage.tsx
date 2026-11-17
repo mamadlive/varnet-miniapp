@@ -180,6 +180,7 @@ export default function OrdersPage() {
   const [actionError, setActionError] = useState<string | null>(null)
   const [actionBusy, setActionBusy] = useState(false)
   const [feedback, setFeedback] = useState<string | null>(null)
+  const [feedbackWarning, setFeedbackWarning] = useState(false)
 
   const load = useCallback(async () => {
     try {
@@ -245,16 +246,22 @@ export default function OrdersPage() {
     setActionError(null)
     setFeedback(null)
     try {
-      await actOnOrder(
+      const result = await actOnOrder(
         actionState.order.id,
         actionState.action,
         actionState.action === 'complete' ? note.trim() : undefined,
         actionState.action === 'reject' ? note.trim() : undefined,
       )
+      const delivery = result.telegramDelivery
+      const deliveryError = delivery?.message ?? 'خطای ارسال به تلگرام'
+      const deliveryCode = delivery?.code && !deliveryError.includes(delivery.code) ? ` (${delivery.code})` : ''
+      setFeedbackWarning(delivery?.sent === false)
       setFeedback(
-        actionState.action === 'complete'
-          ? 'سفارش تایید و تحویل شد و اطلاعات تحویل برای کاربر ثبت گردید.'
-          : 'سفارش رد شد و در صورت پرداخت، مبلغ به کیف پول کاربر برگشت.',
+        delivery?.sent === false
+          ? `سفارش تکمیل شد، اما ارسال به تلگرام انجام نشد: ${deliveryError}${deliveryCode}. کاربر می‌تواند دوباره تلاش کند.`
+          : actionState.action === 'complete'
+            ? delivery?.sent ? 'سفارش تکمیل و فایل به تلگرام مشتری ارسال شد.' : 'سفارش تایید و تحویل شد و اطلاعات تحویل برای کاربر ثبت گردید.'
+            : 'سفارش رد شد و در صورت پرداخت، مبلغ به کیف پول کاربر برگشت.',
       )
       setActionState(null)
       refresh()
@@ -321,7 +328,9 @@ export default function OrdersPage() {
       />
 
       {feedback ? (
-        <div className="rounded-xl border border-emerald-500/25 bg-emerald-500/10 px-3 py-2 text-[12px] font-medium text-emerald-700 dark:text-emerald-400">
+        <div role="status" className={feedbackWarning
+          ? 'rounded-xl border border-amber-500/25 bg-amber-500/10 px-3 py-2 text-[12px] font-medium text-amber-700 dark:text-amber-400'
+          : 'rounded-xl border border-emerald-500/25 bg-emerald-500/10 px-3 py-2 text-[12px] font-medium text-emerald-700 dark:text-emerald-400'}>
           {feedback}
         </div>
       ) : null}

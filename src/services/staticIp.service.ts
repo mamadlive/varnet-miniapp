@@ -1,4 +1,4 @@
-import { apiGetProxy } from '@/services/apiClient'
+import { ApiError, apiGetProxy, apiPostProxy } from '@/services/apiClient'
 import { endpoints } from '@/services/endpoints'
 import { getTelegramInitData } from '@/services/telegram'
 import type {
@@ -65,6 +65,28 @@ export async function listPurchasedServices(): Promise<PurchasedStaticIpService[
     throw new Error(payload?.message || 'خواندن سرویس‌های فعال از سرور انجام نشد.')
   }
   return payload.data
+}
+
+export async function createConfigDownloadUrl(orderId: string): Promise<string> {
+  const response = await apiPostProxy<{ success: boolean; data?: { token: string }; message?: string; code?: string }>(
+    endpoints.staticIp.download, { orderId }, { headers: authHeaders() },
+  )
+  if (!response?.success || !response.data?.token) {
+    throw new ApiError(response?.message || 'لینک دانلود ایجاد نشد.', { code: response?.code })
+  }
+  const url = new URL(endpoints.staticIp.download, window.location.origin)
+  url.searchParams.set('orderId', orderId)
+  url.searchParams.set('token', response.data.token)
+  return url.toString()
+}
+
+export async function resendConfigToTelegram(orderId: string): Promise<void> {
+  const response = await apiPostProxy<{ success: boolean; message?: string; code?: string }>(
+    endpoints.staticIp.resend, { orderId }, { headers: authHeaders() },
+  )
+  if (!response?.success) {
+    throw new ApiError(response?.message || 'ارسال فایل به تلگرام انجام نشد.', { code: response?.code })
+  }
 }
 
 /** Admin plan row → purchasable storefront plan. */

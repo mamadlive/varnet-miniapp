@@ -6,6 +6,7 @@ import {
   Download,
   FileText,
   KeyRound,
+  Send,
   ShieldCheck,
 } from 'lucide-react'
 import { Badge } from '@/components/ui/Badge'
@@ -13,8 +14,11 @@ import { Button } from '@/components/ui/Button'
 import { Card } from '@/components/ui/Card'
 import { useTelegram } from '@/hooks/useTelegram'
 import { formatCurrency, formatDate } from '@/lib/format'
-import { downloadTextFile, looksLikeOpenVpnProfile } from '@/lib/ovpn'
+import { looksLikeOpenVpnProfile } from '@/lib/ovpn'
 import { cn } from '@/lib/utils'
+import { ApiError } from '@/services/apiClient'
+import { createConfigDownloadUrl, resendConfigToTelegram } from '@/services/staticIp.service'
+import { isInsideTelegram, webApp } from '@/services/telegram'
 import type { PurchasedStaticIpService } from '@/types'
 
 export interface ActiveServiceCardProps {
@@ -24,20 +28,19 @@ export interface ActiveServiceCardProps {
   className?: string
 }
 
-function configFilename(service: PurchasedStaticIpService, profile: boolean): string {
-  const safeId = service.orderId.replace(/[^a-zA-Z0-9_-]/g, '')
-  return `varnet-${safeId || 'static-ip'}.${profile ? 'ovpn' : 'txt'}`
+function actionErrorMessage(error: unknown): string {
+  if (error instanceof ApiError && error.code && !error.message.includes(error.code)) {
+    return `${error.message} (${error.code})`
+  }
+  return error instanceof Error ? error.message : 'انجام درخواست ممکن نشد.'
 }
-
-/**
- * D1-backed purchased static-IP service: the config the admin recorded when
- * completing the order is downloadable as an `.ovpn` profile, or viewable and
- * copyable as plain credentials when it is free-form text.
- */
 export function ActiveServiceCard({ service, onNotice, className }: ActiveServiceCardProps) {
   const { haptic } = useTelegram()
   const [showConfig, setShowConfig] = useState(false)
   const [copied, setCopied] = useState(false)
+  const [downloading, setDownloading] = useState(false)
+  const [resending, setResending] = useState(false)
+  const [actionError, setActionError] = useState<string | null>(null)
   const copyTimer = useRef<number | null>(null)
 
   const note = service.deliveryNote?.trim() ?? ''
@@ -52,20 +55,48 @@ export function ActiveServiceCard({ service, onNotice, className }: ActiveServic
     [],
   )
 
-  const handleDownload = () => {
-    if (!hasConfig) return
+  const handleDownload = async () => {
+    if (!hasConfig || downloading) return
     haptic('light')
-    const content = isProfile && !note.endsWith('\n') ? `${note}\n` : note
-    downloadTextFile(
-      content,
-      configFilename(service, isProfile),
-      isProfile ? 'application/x-openvpn-profile' : 'text/plain;charset=utf-8',
-    )
-    onNotice?.(
-      isProfile
-        ? 'فایل پروفایل OpenVPN دانلود شد؛ آن را در برنامه OpenVPN باز کنید.'
-        : 'فایل اطلاعات اتصال دانلود شد.',
-    )
+    setActionError(null)
+    const insideTelegram = isInsideTelegram()
+    const popup = insideTelegram ? null : window.open('about:blank', '_blank')
+    if (!insideTelegram && !popup) {
+      setActionError('مرورگر پنجره دانلود را مسدود کرد. اجازه باز شدن پنجره را بدهید.')
+      return
+    }
+    if (popup) popup.opener = null
+    setDownloading(true)
+    try {
+      const url = await createConfigDownloadUrl(service.orderId)
+      if (insideTelegram) {
+        const app = webApp as { openLink?: (url: string) => void } | null
+        if (typeof app?.openLink !== 'function') throw new Error('باز کردن لینک در این نسخه تلگرام پشتیبانی نمی‌شود.')
+        app.openLink(url)
+      } else if (popup) {
+        popup.location.replace(url)
+      }
+    } catch (error) {
+      popup?.close()
+      setActionError(actionErrorMessage(error))
+    } finally {
+      setDownloading(false)
+    }
+  }
+
+  const handleResend = async () => {
+    if (!hasConfig || resending) return
+    haptic('light')
+    setActionError(null)
+    setResending(true)
+    try {
+      await resendConfigToTelegram(service.orderId)
+      onNotice?.('فایل به تلگرام شما ارسال شد.')
+    } catch (error) {
+      setActionError(actionErrorMessage(error))
+    } finally {
+      setResending(false)
+    }
   }
 
   const handleCopy = async () => {
@@ -118,7 +149,7 @@ export function ActiveServiceCard({ service, onNotice, className }: ActiveServic
             </p>
             <p className="mt-1.5 text-[10.5px] leading-relaxed text-tg-hint">
               {isProfile
-                ? 'این فایل کامل است؛ آن را در برنامه OpenVPN باز کنید و متصل شوید.'
+                ? 'فایل تحویل‌شده را در برنامه OpenVPN باز کنید.'
                 : 'نام کاربری، رمز و اطلاعات سرور را از متن زیر بردارید و در کلاینت OpenVPN وارد کنید.'}
             </p>
 
@@ -126,24 +157,41 @@ export function ActiveServiceCard({ service, onNotice, className }: ActiveServic
               <Button
                 variant="secondary"
                 size="sm"
-                leftIcon={<Download className="size-3.5" aria-hidden />}
-                onClick={handleDownload}
+                className="h-auto min-h-12 px-2 py-1.5 text-center text-[11px] leading-4"
+                loading={downloading}
+                disabled={resending}
+                leftIcon={<Download className="size-3.5 shrink-0" aria-hidden />}
+                onClick={() => void handleDownload()}
               >
                 دانلود فایل کانفیگ
               </Button>
               <Button
-                variant="ghost"
+                variant="secondary"
                 size="sm"
-                leftIcon={<FileText className="size-3.5" aria-hidden />}
-                onClick={() => {
-                  haptic('light')
-                  setShowConfig((visible) => !visible)
-                }}
-                aria-expanded={showConfig}
+                className="h-auto min-h-12 px-2 py-1.5 text-center text-[11px] leading-4"
+                loading={resending}
+                disabled={downloading}
+                leftIcon={<Send className="size-3.5 shrink-0" aria-hidden />}
+                onClick={() => void handleResend()}
               >
-                {showConfig ? 'بستن متن' : 'نمایش متن کانفیگ'}
+                ارسال مجدد فایل به تلگرام
               </Button>
             </div>
+            {actionError ? <p role="alert" className="mt-2 text-[11px] text-tg-destructive">{actionError}</p> : null}
+            <Button
+              variant="ghost"
+              size="sm"
+              fullWidth
+              className="mt-2"
+              leftIcon={<FileText className="size-3.5" aria-hidden />}
+              onClick={() => {
+                haptic('light')
+                setShowConfig((visible) => !visible)
+              }}
+              aria-expanded={showConfig}
+            >
+              {showConfig ? 'بستن متن' : 'نمایش متن کانفیگ'}
+            </Button>
 
             {showConfig ? (
               <div className="mt-2.5">
