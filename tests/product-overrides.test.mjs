@@ -310,6 +310,51 @@ test('GET bundle excludes the mapper and serves stored fields without classifica
   assert.deepEqual(product.features, ['ویژگی'])
 })
 
+test('migration adds logo_url to an existing catalogue without losing products', () => {
+  const existing = new DatabaseSync(':memory:')
+  try {
+    const migrations = readdirSync(resolve(root, 'migrations')).filter(name => /^\d+.*\.sql$/.test(name)).sort()
+    const migration = migrations.find(name => name.startsWith('0010'))
+    assert.ok(migration)
+    for (const file of migrations.filter(name => name < migration)) existing.exec(readFileSync(resolve(root, 'migrations', file), 'utf8'))
+    existing.prepare('INSERT INTO products (id,title,category,price,stock,synced_at) VALUES (?,?,?,?,?,?)').run('existing', 'Existing', 'other', 100, 1, '2025-01-01')
+    existing.exec(readFileSync(resolve(root, 'migrations', migration), 'utf8'))
+    const row = existing.prepare('SELECT id, title, logo_url FROM products WHERE id = ?').get('existing')
+    assert.equal(row.id, 'existing')
+    assert.equal(row.title, 'Existing')
+    assert.equal(row.logo_url, null)
+    assert.equal(existing.prepare('PRAGMA table_info(products)').all().find(column => column.name === 'logo_url').type, 'TEXT')
+  } finally {
+    existing.close()
+  }
+})
+
+test('sync bindings and product GET accept missing, empty, and populated logos', async () => {
+  const syncPath = resolve(root, 'functions/api/sync.ts')
+  const source = `${readFileSync(syncPath, 'utf8')}\nexport { toBindings, UPSERT_SQL };\n`
+  const result = await build({ stdin: { contents: source, resolveDir: dirname(syncPath), sourcefile: 'sync.ts', loader: 'ts' }, bundle: true, platform: 'node', format: 'esm', write: false, logLevel: 'silent' })
+  const { toBindings, UPSERT_SQL } = await import(`data:text/javascript;base64,${Buffer.from(result.outputFiles[0].contents).toString('base64')}`)
+  const product = { id: 'logo-test', title: 'Test', category: 'other', price: 100, stock: 1, currency: 'IRT' }
+  for (const logoUrl of [undefined, null, '', 'https://example.test/logo.png', null]) {
+    sqlite.prepare(UPSERT_SQL).run(...toBindings({ ...product, logoUrl }, '2025-01-01'))
+    assert.equal(sqlite.prepare('SELECT logo_url FROM products WHERE id = ?').get(product.id).logo_url, logoUrl ?? null)
+    const response = await getProducts()
+    assert.equal(response.status, 200)
+    assert.equal((await response.json()).data.find(item => item.id === product.id).logoUrl, logoUrl ?? undefined)
+  }
+
+  catalog = [{ id: 'unknown-logo', title: 'qzxqv jqzpk', price: 10, stock: 1 }]
+  for (let attempt = 0; attempt < 2; attempt++) {
+    if (attempt === 1) sqlite.prepare('UPDATE products SET logo_url = ? WHERE id = ?').run('https://example.test/old.png', 'unknown-logo')
+    const response = await syncCatalog()
+    assert.equal(response.status, 200, await response.clone().text())
+    assert.equal(sqlite.prepare('SELECT logo_url FROM products WHERE id = ?').get('unknown-logo').logo_url, null)
+    const catalogue = await getProducts()
+    assert.equal(catalogue.status, 200)
+    assert.equal((await catalogue.json()).data.find(item => item.id === 'unknown-logo').logoUrl, undefined)
+  }
+})
+
 test('soft deletion survives resync and preserves other overrides', async () => {
   catalog = [{ id: 'p1', title: 'ChatGPT 1M', price: 10, stock: 1 }]
   assert.equal((await syncCatalog()).status, 200)
