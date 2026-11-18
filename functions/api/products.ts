@@ -19,9 +19,11 @@
  */
 
 import { localizeProviderProduct } from '../../src/lib/providerMapper'
+import { classifyProduct } from '../../src/lib/productCategories'
 import type { AccountProduct, ProductCategory } from '../../src/types'
 
 interface D1Result<T> {
+  success?: boolean
   results?: T[]
 }
 
@@ -47,6 +49,7 @@ interface PagesContext {
 interface ProductRow {
   id: string
   title: string
+  provider_title: string | null
   subtitle: string | null
   category: string | null
   price: number
@@ -66,6 +69,11 @@ interface ProductRow {
   emoji: string | null
   brand_key: string | null
   provider_description: string | null
+  override_product_id: string | null
+  fa_description: string | null
+  custom_category: ProductCategory | null
+  is_featured: number | null
+  is_bestseller: number | null
 }
 
 class ProductsError extends Error {
@@ -77,15 +85,6 @@ class ProductsError extends Error {
     this.code = code
   }
 }
-
-const PRODUCT_CATEGORIES: readonly ProductCategory[] = [
-  'streaming',
-  'ai',
-  'gaming',
-  'design',
-  'social',
-  'other',
-]
 
 const RESPONSE_HEADERS = {
   'content-type': 'application/json; charset=utf-8',
@@ -154,19 +153,16 @@ function parseFeatures(raw: string | null): string[] | undefined {
   }
 }
 
-function toCategory(raw: string | null): ProductCategory {
-  return PRODUCT_CATEGORIES.includes(raw as ProductCategory)
-    ? (raw as ProductCategory)
-    : 'other'
-}
-
 /** D1 row → AccountProduct, then one idempotent dictionary pass. */
 function toProduct(row: ProductRow): AccountProduct {
-  return localizeProviderProduct({
+  const product = localizeProviderProduct({
     id: row.id,
     title: row.title,
+    providerTitle: row.provider_title ?? row.title,
     subtitle: row.subtitle ?? undefined,
-    category: toCategory(row.category),
+    category: row.custom_category ?? classifyProduct(row.provider_title ?? row.title),
+    customCategory: row.custom_category ?? undefined,
+    faDescription: row.fa_description ?? undefined,
     price: finiteNumber(row.price) ?? 0,
     oldPrice: finiteNumber(row.old_price),
     providerPrice: finiteNumber(row.provider_price),
@@ -185,6 +181,17 @@ function toProduct(row: ProductRow): AccountProduct {
     emoji: row.emoji ?? undefined,
     brandKey: row.brand_key ?? undefined,
   })
+
+  return {
+    ...product,
+    category: row.custom_category ?? classifyProduct(row.provider_title ?? row.title),
+    description: row.fa_description ?? product.description,
+    ...(row.custom_category !== null ? { customCategory: row.custom_category } : {}),
+    ...(row.fa_description !== null ? { faDescription: row.fa_description } : {}),
+    ...(row.override_product_id !== null
+      ? { isFeatured: row.is_featured === 1, isBestseller: row.is_bestseller === 1 }
+      : {}),
+  }
 }
 
 export async function onRequestGet(context: PagesContext): Promise<Response> {
@@ -200,9 +207,17 @@ export async function onRequestGet(context: PagesContext): Promise<Response> {
     let rows: ProductRow[]
     try {
       const result = await db
-        .prepare('SELECT * FROM products ORDER BY title COLLATE NOCASE')
+        .prepare(`SELECT products.*, product_overrides.product_id AS override_product_id,
+                         product_overrides.fa_description, product_overrides.custom_category,
+                         product_overrides.is_featured, product_overrides.is_bestseller
+                  FROM products
+                  LEFT JOIN product_overrides ON product_overrides.product_id = products.id
+                  ORDER BY products.title COLLATE NOCASE`)
         .all<ProductRow>()
-      rows = Array.isArray(result.results) ? result.results : []
+      if (result.success === false || !Array.isArray(result.results)) {
+        throw new Error('D1 did not return catalogue results')
+      }
+      rows = result.results
     } catch (cause) {
       throw new ProductsError('PRODUCTS_READ_FAILED', 'خواندن کاتالوگ از D1 ناموفق بود.', {
         cause,

@@ -7,7 +7,6 @@ import {
 import { localizeProviderProduct } from '@/lib/providerMapper'
 import { ApiError, apiGetProxy, apiPostProxy, isApiError } from '@/services/apiClient'
 import { endpoints } from '@/services/endpoints'
-import { getTelegramInitData } from '@/services/telegram'
 import { useAdminStore } from '@/store/adminStore'
 import type { AccountProduct, PaginationQuery, ProductCategory } from '@/types'
 
@@ -174,18 +173,7 @@ function describeSyncFailure(error: unknown): Error {
   })
 }
 
-function hasTelegramSession(): boolean {
-  return Boolean(getTelegramInitData())
-}
-
-/**
- * Read the mapped catalogue from D1 (`GET /api/products`).
- *
- * Inside Telegram the server catalogue is the source of truth; the local store
- * only exists so the desktop preview stays reviewable. Rows come back already
- * localized, and the endpoint re-runs the mapper for rows stored before the
- * dictionary existed.
- */
+/** Read the shared D1 catalogue and its admin-authored overrides. */
 async function fetchCatalogueFromServer(): Promise<AccountProduct[]> {
   const payload = await apiGetProxy<ProviderCatalogEnvelope>(endpoints.provider.catalogue)
 
@@ -251,13 +239,8 @@ export async function syncAccountProducts(): Promise<AccountCatalogSyncResult> {
 export async function listAccountProducts(
   query: AccountProductQuery = {},
 ): Promise<AccountProduct[]> {
-  if (hasTelegramSession()) {
-    // Inside Telegram, D1 is the source of truth: the catalogue comes back
-    // already dictionary-mapped, so icons/Persian copy match the server rows.
-    // Fixtures stay only for the desktop preview without a Telegram session.
-    const serverProducts = await fetchCatalogueFromServer()
-    useAdminStore.getState().setProducts(serverProducts)
-  }
+  const serverProducts = await fetchCatalogueFromServer()
+  useAdminStore.getState().setProducts(serverProducts)
 
   const { category = 'all', search, includeHidden = false } = query
   const { products, hiddenProductIds, deletedProductIds } = useAdminStore.getState()

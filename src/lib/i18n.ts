@@ -22,14 +22,9 @@ import type {
 
 export const LOCALE = 'fa-IR' as const
 
-const categories: Record<ProductCategory, string> = {
-  streaming: 'استریم',
-  ai: 'هوش مصنوعی',
-  gaming: 'گیمینگ',
-  design: 'طراحی',
-  social: 'شبکه‌های اجتماعی',
-  other: 'سایر',
-}
+import { CATEGORY_LABELS } from './productCategories'
+
+const categories: Record<ProductCategory, string> = CATEGORY_LABELS
 
 const orderStatuses: Record<OrderStatus, string> = {
   pending: 'در انتظار',

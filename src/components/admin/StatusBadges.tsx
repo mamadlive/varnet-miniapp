@@ -31,6 +31,10 @@ const CATEGORY_TONES: Record<ProductCategory, BadgeTone> = {
   ai: 'brand',
   gaming: 'info',
   design: 'warning',
+  os: 'info',
+  office: 'brand',
+  security: 'success',
+  dev: 'info',
   social: 'success',
   other: 'neutral',
 }

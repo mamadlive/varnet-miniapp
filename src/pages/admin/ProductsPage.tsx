@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   CheckCircle2,
   CircleAlert,
@@ -32,27 +32,29 @@ import {
   hasMargin,
   type ProfitMargin,
 } from '@/lib/pricing'
+import { PRODUCT_CATEGORIES, CATEGORY_LABELS } from '@/lib/productCategories'
 import { cn } from '@/lib/utils'
 import { formatCount, formatCurrency, toPersianDigits } from '@/lib/format'
 import { fa } from '@/lib/i18n'
 import { isApiError } from '@/services/apiClient'
 import { listAccountProducts, syncAccountProducts } from '@/services/accounts.service'
+import { saveProductOverride } from '@/services/admin.service'
 import { TEST_PRODUCT_IDS } from '@/services/mocks'
 import { useAdminStore } from '@/store/adminStore'
 import type { AccountProduct, DiscountType, ProductCategory } from '@/types'
 
 const MAX_FIXED_MARGIN = 50_000_000
 
+function errorMessage(error: unknown, fallback: string): string {
+  const message = error instanceof Error ? error.message : fallback
+  return isApiError(error) && error.code ? `${message} (${error.code})` : message
+}
+
 type CategoryFilter = ProductCategory | 'all'
 
 const CATEGORY_FILTER_OPTIONS: FilterChipOption<CategoryFilter>[] = [
   { value: 'all', label: 'همه محصولات' },
-  { value: 'streaming', label: fa.categories.streaming },
-  { value: 'ai', label: fa.categories.ai },
-  { value: 'gaming', label: fa.categories.gaming },
-  { value: 'design', label: fa.categories.design },
-  { value: 'social', label: fa.categories.social },
-  { value: 'other', label: fa.categories.other },
+  ...PRODUCT_CATEGORIES.map((value) => ({ value, label: CATEGORY_LABELS[value] })),
 ]
 
 export default function ProductsPage() {
@@ -87,6 +89,16 @@ export default function ProductsPage() {
   const [marginError, setMarginError] = useState<string | null>(null)
   const [noteProduct, setNoteProduct] = useState<AccountProduct | null>(null)
   const [noteValue, setNoteValue] = useState('')
+  const [editProduct, setEditProduct] = useState<AccountProduct | null>(null)
+  const [faDescription, setFaDescription] = useState('')
+  const [customCategory, setCustomCategory] = useState<ProductCategory | ''>('')
+  const [isFeatured, setIsFeatured] = useState(false)
+  const [isBestseller, setIsBestseller] = useState(false)
+  const [savingProduct, setSavingProduct] = useState(false)
+  const [editError, setEditError] = useState<string | null>(null)
+  const [editNotice, setEditNotice] = useState<string | null>(null)
+  const editDialogRef = useRef<HTMLDivElement>(null)
+  const editTriggerRef = useRef<HTMLElement | null>(null)
 
   const testProductCount = products.filter((product) =>
     TEST_PRODUCT_IDS.includes(product.id),
@@ -101,6 +113,48 @@ export default function ProductsPage() {
       : autoMarginForUsd(usdPriceOf(product), marginTiers)
   const finalPriceOf = (product: AccountProduct): number =>
     applyProfitMargin(basePriceOf(product), marginFor(product))
+
+  const openProductEditor = (product: AccountProduct) => {
+    editTriggerRef.current = document.activeElement instanceof HTMLElement ? document.activeElement : null
+    setEditProduct(product)
+    setFaDescription(product.faDescription ?? '')
+    setCustomCategory(product.customCategory ?? '')
+    setIsFeatured(product.isFeatured ?? false)
+    setIsBestseller(product.isBestseller ?? false)
+    setEditError(null)
+    setEditNotice(null)
+  }
+
+  const closeProductEditor = () => {
+    if (savingProduct) return
+    setEditProduct(null)
+    editTriggerRef.current?.focus()
+  }
+
+  useEffect(() => {
+    if (!editProduct) return
+    const dialog = editDialogRef.current?.closest<HTMLElement>('[role="dialog"]')
+    const focusable = () => Array.from(dialog?.querySelectorAll<HTMLElement>(
+      'button:not([disabled]), textarea:not([disabled]), select:not([disabled]), input:not([disabled])',
+    ) ?? [])
+    editDialogRef.current?.querySelector<HTMLElement>('textarea')?.focus()
+    const trapFocus = (event: KeyboardEvent) => {
+      if (event.key !== 'Tab') return
+      const elements = focusable()
+      if (!elements.length) return
+      const first = elements[0]
+      const last = elements[elements.length - 1]
+      if (event.shiftKey && (document.activeElement === first || !dialog?.contains(document.activeElement))) {
+        event.preventDefault()
+        last.focus()
+      } else if (!event.shiftKey && (document.activeElement === last || !dialog?.contains(document.activeElement))) {
+        event.preventDefault()
+        first.focus()
+      }
+    }
+    document.addEventListener('keydown', trapFocus)
+    return () => document.removeEventListener('keydown', trapFocus)
+  }, [editProduct])
 
   const openMarginEditor = (product: AccountProduct) => {
     const rule = margins[product.id]
@@ -189,11 +243,42 @@ export default function ProductsPage() {
     try {
       setProducts(await listAccountProducts({ includeHidden: true }))
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'بارگیری محصولات ممکن نشد.')
+      setError(errorMessage(err, 'بارگیری محصولات ممکن نشد.'))
     } finally {
       setLoading(false)
     }
   }, [])
+
+  const handleSaveProduct = async () => {
+    if (!editProduct || savingProduct) return
+    setSavingProduct(true)
+    setEditError(null)
+    try {
+      await saveProductOverride({
+        productId: editProduct.id,
+        faDescription: faDescription.trim() || null,
+        customCategory: customCategory || null,
+        isFeatured,
+        isBestseller,
+      })
+    } catch (err) {
+      setEditError(errorMessage(err, 'ذخیره تغییرات محصول انجام نشد.'))
+      setSavingProduct(false)
+      return
+    }
+
+    setEditProduct(null)
+    editTriggerRef.current?.focus()
+    try {
+      setProducts(await listAccountProducts({ includeHidden: true }))
+      setError(null)
+      setEditNotice('تغییرات محصول ذخیره شد.')
+    } catch (err) {
+      setError(`تغییرات ذخیره شد، اما بارگیری مجدد کاتالوگ ممکن نشد: ${errorMessage(err, 'خطای بارگیری محصولات')}`)
+    } finally {
+      setSavingProduct(false)
+    }
+  }
 
   const refresh = useCallback(() => {
     setError(null)
@@ -226,8 +311,7 @@ export default function ProductsPage() {
         message: `${formatCount(result.products.length)} محصول از ارائه‌دهنده همگام‌سازی شد${skippedNote}.`,
       })
     } catch (err) {
-      const message = err instanceof Error ? err.message : 'همگام‌سازی محصولات ممکن نشد.'
-      setSyncError(isApiError(err) && err.code ? `${message} (${err.code})` : message)
+      setSyncError(errorMessage(err, 'همگام‌سازی محصولات ممکن نشد.'))
     } finally {
       setSyncing(false)
     }
@@ -240,7 +324,7 @@ export default function ProductsPage() {
         const data = await listAccountProducts({ includeHidden: true })
         if (!cancelled) setProducts(data)
       } catch (err) {
-        if (!cancelled) setError(err instanceof Error ? err.message : 'بارگیری محصولات ممکن نشد.')
+        if (!cancelled) setError(errorMessage(err, 'بارگیری محصولات ممکن نشد.'))
       } finally {
         if (!cancelled) setLoading(false)
       }
@@ -420,6 +504,15 @@ export default function ProductsPage() {
       render: (product) => (
         <div className="flex items-center justify-end gap-1">
           <Button
+            variant="secondary"
+            size="sm"
+            aria-label={`ویرایش محصول ${product.title}`}
+            disabled={savingProduct || syncing || loading}
+            onClick={() => openProductEditor(product)}
+          >
+            ویرایش
+          </Button>
+          <Button
             variant="ghost"
             size="icon"
             className="size-8 rounded-lg"
@@ -480,6 +573,7 @@ export default function ProductsPage() {
               size="sm"
               leftIcon={<CloudDownload className="size-4" />}
               loading={syncing}
+              disabled={savingProduct || loading}
               onClick={() => void handleSync()}
             >
               همگام‌سازی محصولات
@@ -489,6 +583,7 @@ export default function ProductsPage() {
               size="sm"
               leftIcon={<RefreshCw className="size-4" />}
               loading={loading}
+              disabled={savingProduct || syncing}
               onClick={refresh}
             >
               {fa.common.refresh}
@@ -507,6 +602,12 @@ export default function ProductsPage() {
           </div>
         }
       />
+
+      {editNotice ? (
+        <div role="status" className="rounded-xl border border-emerald-500/30 bg-emerald-500/10 px-4 py-3 text-[12.5px] text-emerald-700">
+          {editNotice}
+        </div>
+      ) : null}
 
       {syncNotice ? (
         <div
@@ -601,6 +702,71 @@ export default function ProductsPage() {
           />
         </>
       )}
+
+      <Sheet
+        open={editProduct !== null}
+        onClose={closeProductEditor}
+        title="ویرایش محصول"
+        description={editProduct ? `ویرایش تنظیمات «${editProduct.title}»` : undefined}
+        className="max-h-[90dvh] overflow-y-auto sm:max-w-lg"
+        footer={
+          <div className="flex gap-2">
+            <Button className="flex-1" loading={savingProduct} onClick={() => void handleSaveProduct()}>
+              ذخیره تغییرات
+            </Button>
+            <Button variant="secondary" disabled={savingProduct} onClick={closeProductEditor}>
+              انصراف
+            </Button>
+          </div>
+        }
+      >
+        <div ref={editDialogRef} className="space-y-4" aria-busy={savingProduct}>
+          <div>
+            <label htmlFor="product-fa-description" className="mb-1.5 block text-[13px] font-medium text-tg-text">
+              توضیحات فارسی
+            </label>
+            <textarea
+              id="product-fa-description"
+              value={faDescription}
+              onChange={(event) => setFaDescription(event.target.value)}
+              disabled={savingProduct}
+              rows={5}
+              dir="auto"
+              aria-describedby="product-fa-description-help"
+              className="w-full resize-y rounded-xl border border-tg-separator bg-tg-bg px-3.5 py-2.5 text-[13px] leading-relaxed text-tg-text focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500/20"
+            />
+            <p id="product-fa-description-help" className="mt-1 text-[11.5px] text-tg-hint">
+              برای حذف توضیحات سفارشی، این فیلد را خالی بگذارید.
+            </p>
+          </div>
+          <div>
+            <label htmlFor="product-custom-category" className="mb-1.5 block text-[13px] font-medium text-tg-text">
+              دسته‌بندی
+            </label>
+            <select
+              id="product-custom-category"
+              value={customCategory}
+              onChange={(event) => setCustomCategory(event.target.value as ProductCategory | '')}
+              disabled={savingProduct}
+              className="w-full rounded-xl border border-tg-separator bg-tg-bg px-3.5 py-2.5 text-[13px] text-tg-text focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500/20"
+            >
+              <option value="">خودکار (حذف دسته‌بندی سفارشی)</option>
+              {PRODUCT_CATEGORIES.map((item: ProductCategory) => (
+                <option key={item} value={item}>{CATEGORY_LABELS[item]}</option>
+              ))}
+            </select>
+          </div>
+          <label className="flex items-center gap-2 text-[13px] text-tg-text">
+            <input type="checkbox" checked={isFeatured} disabled={savingProduct} onChange={(event) => setIsFeatured(event.target.checked)} />
+            محصول ویژه
+          </label>
+          <label className="flex items-center gap-2 text-[13px] text-tg-text">
+            <input type="checkbox" checked={isBestseller} disabled={savingProduct} onChange={(event) => setIsBestseller(event.target.checked)} />
+            محصول پرفروش
+          </label>
+          {editError ? <p role="alert" className="text-[12.5px] text-tg-destructive">{editError}</p> : null}
+        </div>
+      </Sheet>
 
       <Sheet
         open={marginProduct !== null}

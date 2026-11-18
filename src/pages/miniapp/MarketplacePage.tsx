@@ -10,17 +10,10 @@ import { Badge, Button, Card, EmptyState, Input } from '@/components/ui'
 import { useTelegram } from '@/hooks/useTelegram'
 import { formatCount } from '@/lib/format'
 import { fa } from '@/lib/i18n'
+import { PRODUCT_CATEGORIES } from '@/lib/productCategories'
 import { listAccountProducts } from '@/services/accounts.service'
+import { isApiError } from '@/services/apiClient'
 import type { AccountProduct, Currency, ProductCategory } from '@/types'
-
-const PRODUCT_CATEGORIES: ProductCategory[] = [
-  'streaming',
-  'ai',
-  'gaming',
-  'design',
-  'social',
-  'other',
-]
 
 /** Everything the purchase confirmation sheet needs about the tapped product. */
 interface PendingPurchase {
@@ -50,7 +43,7 @@ export default function MarketplacePage() {
 
   const [products, setProducts] = useState<AccountProduct[]>([])
   const [loading, setLoading] = useState(true)
-  const [loadFailed, setLoadFailed] = useState(false)
+  const [loadError, setLoadError] = useState<string | null>(null)
   const [reloadKey, setReloadKey] = useState(0)
   const [selectedProduct, setSelectedProduct] = useState<AccountProduct | null>(null)
   const [pendingPurchase, setPendingPurchase] = useState<PendingPurchase | null>(null)
@@ -64,10 +57,11 @@ export default function MarketplacePage() {
       .then((result) => {
         if (!cancelled) setProducts(result)
       })
-      .catch(() => {
+      .catch((error: unknown) => {
         if (!cancelled) {
           setProducts([])
-          setLoadFailed(true)
+          const message = error instanceof Error ? error.message : 'دریافت کاتالوگ ناموفق بود.'
+          setLoadError(isApiError(error) && error.code ? `${message} (${error.code})` : message)
         }
       })
       .finally(() => {
@@ -113,7 +107,7 @@ export default function MarketplacePage() {
 
   const retryLoad = () => {
     setLoading(true)
-    setLoadFailed(false)
+    setLoadError(null)
     setReloadKey((key) => key + 1)
   }
 
@@ -140,13 +134,19 @@ export default function MarketplacePage() {
     setPendingPurchase(null)
   }, [])
 
+  const availableCategories = useMemo(
+    () => [...new Set(products.filter((product) => product.stock > 0).map((product) => product.customCategory ?? product.category))],
+    [products],
+  )
+
   const filtered = useMemo(() => {
     const term = query.trim().toLowerCase()
     return products.filter((product) => {
-      if (category !== 'all' && product.category !== category) return false
+      const productCategory = product.customCategory ?? product.category
+      if (category !== 'all' && productCategory !== category) return false
       if (!term) return true
       const haystack =
-        `${product.title} ${product.subtitle ?? ''} ${product.category}`.toLowerCase()
+        `${product.title} ${product.subtitle ?? ''} ${productCategory}`.toLowerCase()
       return haystack.includes(term)
     })
   }, [products, category, query])
@@ -185,7 +185,7 @@ export default function MarketplacePage() {
                 type="button"
                 aria-label="پاک کردن جستجو"
                 onClick={() => handleQuery('')}
-                className="flex size-7 shrink-0 items-center justify-center rounded-full bg-tg-secondary-bg text-tg-hint transition-colors hover:text-tg-text"
+                className="-my-2 flex size-11 shrink-0 items-center justify-center rounded-full text-tg-hint transition-colors hover:text-tg-text"
               >
                 <X className="size-3.5" aria-hidden />
               </button>
@@ -195,7 +195,7 @@ export default function MarketplacePage() {
       </div>
 
       <div className="mt-4">
-        <CategoryChips value={category} onChange={handleCategory} />
+        <CategoryChips value={category} onChange={handleCategory} availableCategories={availableCategories} />
       </div>
 
       <div className="mb-2.5 mt-2 flex min-h-6 items-center justify-between gap-2 px-1">
@@ -219,12 +219,12 @@ export default function MarketplacePage() {
             <ProductCardSkeleton key={index} />
           ))}
         </div>
-      ) : loadFailed ? (
+      ) : loadError ? (
         <Card variant="surface" padded={false}>
           <EmptyState
             icon={RefreshCw}
             title="بارگذاری کاتالوگ ناموفق بود"
-            description="سرویس بازارچه در دسترس نیست. اتصال خود را بررسی کنید و دوباره تلاش کنید."
+            description={loadError}
             action={
               <Button size="sm" variant="secondary" onClick={retryLoad}>
                 {fa.common.retry}

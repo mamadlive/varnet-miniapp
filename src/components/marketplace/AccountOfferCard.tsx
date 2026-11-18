@@ -1,6 +1,6 @@
 import type { CSSProperties } from 'react'
 import type { LucideIcon } from 'lucide-react'
-import { Bot, Clapperboard, Gamepad2, Package, Palette, Send, ShoppingBag, Star } from 'lucide-react'
+import { Bot, Clapperboard, Code2, Gamepad2, Monitor, Package, Palette, Send, ShieldCheck, ShoppingBag, Star, Wrench } from 'lucide-react'
 import { Badge } from '@/components/ui/Badge'
 import { Button } from '@/components/ui/Button'
 import { Skeleton } from '@/components/ui/Skeleton'
@@ -17,6 +17,10 @@ const CATEGORY_ICONS: Record<ProductCategory, LucideIcon> = {
   ai: Bot,
   gaming: Gamepad2,
   design: Palette,
+  os: Monitor,
+  office: Wrench,
+  security: ShieldCheck,
+  dev: Code2,
   social: Send,
   other: Package,
 }

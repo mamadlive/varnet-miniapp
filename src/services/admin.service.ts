@@ -11,6 +11,7 @@ import type {
   Order,
   PaymentReceipt,
   PaymentReceiptStatus,
+  ProductCategory,
   RevenuePoint,
   StaticIpNode,
   StaticIpNodeAvailability,
@@ -55,6 +56,26 @@ async function adminGet<T>(url: string): Promise<T> {
   const payload = await apiGetProxy<AdminEnvelope<T>>(url, { headers: adminHeaders() })
   if (!payload || payload.success !== true || payload.data === undefined) {
     throw adminFailure(payload, 'پاسخ سرور مدیریتی نامعتبر بود.')
+  }
+  return payload.data
+}
+
+export interface ProductOverrideInput {
+  productId: string
+  faDescription: string | null
+  customCategory: ProductCategory | null
+  isFeatured: boolean
+  isBestseller: boolean
+}
+
+export async function saveProductOverride(input: ProductOverrideInput): Promise<unknown> {
+  const payload = await apiPostProxy<AdminEnvelope<unknown>>(
+    '/api/admin/products/override',
+    input,
+    { headers: adminHeaders() },
+  )
+  if (!payload || payload.success !== true || payload.data === undefined || payload.data === null) {
+    throw adminFailure(payload, 'ذخیره تغییرات محصول انجام نشد.')
   }
   return payload.data
 }

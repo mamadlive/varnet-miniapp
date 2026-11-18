@@ -42,13 +42,20 @@ export interface User {
 /* Account marketplace                                                        */
 /* -------------------------------------------------------------------------- */
 
-export type ProductCategory = 'streaming' | 'ai' | 'gaming' | 'design' | 'social' | 'other'
+export type ProductCategory =
+  | 'ai' | 'design' | 'os' | 'office' | 'security'
+  | 'streaming' | 'dev' | 'social' | 'gaming' | 'other'
 
 export interface AccountProduct {
   id: string
   title: string
+  providerTitle?: string
   subtitle?: string
   category: ProductCategory
+  customCategory?: ProductCategory
+  faDescription?: string
+  isFeatured?: boolean
+  isBestseller?: boolean
   /** Final customer price (provider base price + profit margin). */
   price: number
   oldPrice?: number

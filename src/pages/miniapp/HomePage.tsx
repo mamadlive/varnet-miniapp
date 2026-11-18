@@ -29,9 +29,9 @@ import { EmptyState } from '@/components/ui/EmptyState'
 import { useTelegram } from '@/hooks/useTelegram'
 import { formatCount } from '@/lib/format'
 import { fa } from '@/lib/i18n'
-import { pickFeaturedProducts } from '@/lib/providerMapper'
 import { initials } from '@/lib/utils'
 import { listAccountProducts } from '@/services/accounts.service'
+import { isApiError } from '@/services/apiClient'
 import { listVpnPlans } from '@/services/vpn.service'
 import { useAuthStore } from '@/store/authStore'
 import { useWalletStore } from '@/store/walletStore'
@@ -133,7 +133,7 @@ export default function HomePage() {
   const [plans, setPlans] = useState<VpnPlan[]>([])
   const [productsLoading, setProductsLoading] = useState(true)
   const [plansLoading, setPlansLoading] = useState(true)
-  const [productsFailed, setProductsFailed] = useState(false)
+  const [productsError, setProductsError] = useState<string | null>(null)
   const [plansFailed, setPlansFailed] = useState(false)
   const [reloadKey, setReloadKey] = useState(0)
   const [pendingPurchase, setPendingPurchase] = useState<PendingPurchase | null>(null)
@@ -147,10 +147,11 @@ export default function HomePage() {
       .then((result) => {
         if (!cancelled) setProducts(result)
       })
-      .catch(() => {
+      .catch((error: unknown) => {
         if (!cancelled) {
           setProducts([])
-          setProductsFailed(true)
+          const message = error instanceof Error ? error.message : 'دریافت کاتالوگ ناموفق بود.'
+          setProductsError(isApiError(error) && error.code ? `${message} (${error.code})` : message)
         }
       })
       .finally(() => {
@@ -188,7 +189,14 @@ export default function HomePage() {
     [products.length, plans.length],
   )
 
-  const featured = useMemo(() => pickFeaturedProducts(products), [products])
+  const featured = useMemo(
+    () => products.filter((product) => product.stock > 0 && product.isFeatured),
+    [products],
+  )
+  const bestsellers = useMemo(
+    () => products.filter((product) => product.stock > 0 && product.isBestseller),
+    [products],
+  )
 
   const handleTabChange = useCallback(
     (next: MarketplaceTab) => {
@@ -201,7 +209,7 @@ export default function HomePage() {
   const retry = useCallback(() => {
     setProductsLoading(true)
     setPlansLoading(true)
-    setProductsFailed(false)
+    setProductsError(null)
     setPlansFailed(false)
     setReloadKey((key) => key + 1)
   }, [])
@@ -250,7 +258,7 @@ export default function HomePage() {
       if (toastTimer.current !== null) window.clearTimeout(toastTimer.current)
       toastTimer.current = window.setTimeout(() => setToast(null), 3000)
     },
-    [plans],
+    [],
   )
 
   const handlePurchaseCancel = useCallback(() => {
@@ -345,10 +353,10 @@ export default function HomePage() {
                     className="flex items-center gap-1.5 text-[15px] font-bold text-tg-text"
                   >
                     <Sparkles className="size-4 text-brand-500" aria-hidden />
-                    محصولات ویژه
+                    پیشنهادهای ویژه
                   </h3>
                   <p className="mt-0.5 text-[11.5px] leading-snug text-tg-hint">
-                    محبوب‌ترین اشتراک‌ها، دست‌چین‌شده با تحویل فوری
+                    پیشنهادهای منتخب فروشگاه
                   </p>
                 </div>
                 <span className="shrink-0 text-[10.5px] font-medium text-tg-hint">پیشنهاد ما</span>
@@ -356,9 +364,9 @@ export default function HomePage() {
               <div className="w-full overflow-hidden">
                 <div
                   role="group"
-                  aria-label="محصولات ویژه"
+                  aria-label="پیشنهادهای ویژه"
                   tabIndex={0}
-                  className="hide-scrollbar -mx-4 flex max-w-full flex-nowrap snap-x snap-mandatory gap-3 overflow-x-auto overflow-y-hidden overscroll-x-contain scroll-px-4 px-4 pb-1 touch-pan-x [-webkit-overflow-scrolling:touch]"
+                  className="hide-scrollbar -mx-4 flex max-w-full flex-nowrap snap-x snap-mandatory gap-3 overflow-x-auto overflow-y-hidden overscroll-x-contain scroll-px-4 px-4 pb-1 touch-pan-x [&_button]:min-h-11 [-webkit-overflow-scrolling:touch]"
                 >
                   {featured.map((product, index) => (
                     <FeaturedOfferCard
@@ -367,6 +375,37 @@ export default function HomePage() {
                       onPurchase={handlePurchase}
                       style={{ animationDelay: `${index * 40}ms` }}
                     />
+                  ))}
+                </div>
+              </div>
+            </div>
+          ) : null}
+
+          {bestsellers.length > 0 ? (
+            <div className="mb-6" aria-labelledby="bestsellers-heading">
+              <div className="mb-2.5 px-0.5">
+                <h3 id="bestsellers-heading" className="text-[15px] font-bold text-tg-text">
+                  پرفروش‌ها
+                </h3>
+                <p className="mt-0.5 text-[11.5px] leading-snug text-tg-hint">
+                  محصولات منتخب فروشگاه
+                </p>
+              </div>
+              <div className="w-full overflow-hidden">
+                <div
+                  role="group"
+                  aria-label="پرفروش‌ها"
+                  tabIndex={0}
+                  className="hide-scrollbar -mx-4 flex max-w-full flex-nowrap snap-x snap-mandatory gap-3 overflow-x-auto overflow-y-hidden overscroll-x-contain scroll-px-4 px-4 pb-1 touch-pan-x [&_button]:min-h-11 [-webkit-overflow-scrolling:touch]"
+                >
+                  {bestsellers.map((product, index) => (
+                    <div key={product.id} className="w-[180px] shrink-0 snap-start">
+                      <AccountOfferCard
+                        product={product}
+                        onPurchase={handlePurchase}
+                        style={{ animationDelay: `${index * 40}ms` }}
+                      />
+                    </div>
                   ))}
                 </div>
               </div>
@@ -385,12 +424,12 @@ export default function HomePage() {
                 <AccountOfferCardSkeleton key={index} />
               ))}
             </div>
-          ) : productsFailed ? (
+          ) : productsError ? (
             <Card padded={false}>
               <EmptyState
                 icon={RefreshCw}
                 title="بارگذاری اکانت‌ها ناموفق بود"
-                description="در حال حاضر به کاتالوگ دسترسی نداریم. اتصال خود را بررسی کنید و دوباره تلاش کنید."
+                description={productsError}
                 action={
                   <Button size="sm" variant="secondary" onClick={retry}>
                     {fa.common.retry}
@@ -407,7 +446,7 @@ export default function HomePage() {
               />
             </Card>
           ) : (
-            <div className="grid grid-cols-2 gap-3">
+            <div className="grid grid-cols-2 gap-3 [&_button]:min-h-11">
               {products.map((product, index) => (
                 <AccountOfferCard
                   key={product.id}

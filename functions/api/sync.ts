@@ -74,9 +74,9 @@ const UPSERT_SQL = `
     id, title, subtitle, category, price, old_price,
     provider_price, provider_old_price, provider_currency, currency,
     stock, rating, review_count, badge, delivery_time, description,
-    features, gradient, emoji, brand_key, provider_description,
+    features, gradient, emoji, brand_key, provider_description, provider_title,
     synced_at, created_at, updated_at
-  ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   ON CONFLICT(id) DO UPDATE SET
     title = excluded.title,
     subtitle = excluded.subtitle,
@@ -98,6 +98,7 @@ const UPSERT_SQL = `
     emoji = excluded.emoji,
     brand_key = excluded.brand_key,
     provider_description = excluded.provider_description,
+    provider_title = excluded.provider_title,
     synced_at = excluded.synced_at,
     updated_at = excluded.updated_at
 `
@@ -276,6 +277,7 @@ function toBindings(product: AccountProduct, syncedAt: string): unknown[] {
     product.emoji ?? null,
     product.brandKey ?? null,
     product.providerDescription ?? null,
+    product.providerTitle ?? product.title,
     syncedAt,
     syncedAt,
     syncedAt,

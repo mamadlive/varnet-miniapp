@@ -1,6 +1,7 @@
 // Relative imports (not the `@/` alias) so the same dictionary can be bundled
 // into Cloudflare Pages Functions and applied during `/api/sync`.
 import { toPersianDigits } from './format'
+import { classifyProduct } from './productCategories'
 import type { AccountProduct, ProductCategory } from '../types'
 
 /**
@@ -21,6 +22,10 @@ export const PROVIDER_CATEGORY_LABELS: Record<ProductCategory, string> = {
   ai: 'هوش مصنوعی',
   gaming: 'گیمینگ',
   design: 'طراحی و خلاقیت',
+  os: 'سیستم‌عامل',
+  office: 'آفیس و بهره‌وری',
+  security: 'امنیت و VPN',
+  dev: 'توسعه و برنامه‌نویسی',
   social: 'شبکه‌های اجتماعی',
   other: 'سایر محصولات دیجیتال',
 }
@@ -30,6 +35,10 @@ const CATEGORY_TITLES: Record<ProductCategory, string> = {
   ai: 'اشتراک هوش مصنوعی',
   gaming: 'محصول گیمینگ',
   design: 'اشتراک طراحی',
+  os: 'سیستم‌عامل',
+  office: 'ابزار بهره‌وری',
+  security: 'ابزار امنیتی',
+  dev: 'ابزار توسعه',
   social: 'اشتراک شبکه اجتماعی',
   other: 'محصول دیجیتال',
 }
@@ -42,6 +51,10 @@ const CATEGORY_DESCRIPTIONS: Record<ProductCategory, string> = {
     'محصول گیمینگ اورجینال برای خرید بازی، اعتبار درون‌بازی و اشتراک آنلاین؛ تحویل فوری با ضمانت اصالت.',
   design:
     'نرم‌افزار قدرتمند طراحی و گرافیک برای ساخت تصویر، ویدیو و رابط کاربری؛ دسترسی کامل با تحویل فوری.',
+  os: 'سیستم‌عامل و ابزارهای مدیریت دستگاه با تحویل سریع.',
+  office: 'ابزارهای اداری و بهره‌وری برای کار و یادگیری.',
+  security: 'ابزار امنیت و حفظ حریم خصوصی با تحویل سریع.',
+  dev: 'ابزار توسعه نرم‌افزار و مدیریت پروژه.',
   social:
     'اشتراک شبکه اجتماعی با فعال‌سازی فوری روی حساب شخصی و امکانات ویژه مانند تیک آبی و ابزارهای حرفه‌ای.',
   other:
@@ -53,6 +66,10 @@ const CATEGORY_SUBTITLES: Record<ProductCategory, string> = {
   ai: 'دسترسی حرفه‌ای به هوش مصنوعی',
   gaming: 'محصول اورجینال با تحویل فوری',
   design: 'ابزار حرفه‌ای طراحی و خلاقیت',
+  os: 'سیستم‌عامل و ابزارهای رایانه',
+  office: 'ابزار اداری و بهره‌وری',
+  security: 'امنیت و حریم خصوصی',
+  dev: 'ابزار توسعه و برنامه‌نویسی',
   social: 'ارتقای حساب با فعال‌سازی فوری',
   other: 'محصول دیجیتال با تحویل فوری',
 }
@@ -62,6 +79,10 @@ const CATEGORY_FEATURES: Record<ProductCategory, string[]> = {
   ai: ['دسترسی اولویت‌دار', 'فعال‌سازی سریع', 'پشتیبانی کامل'],
   gaming: ['کد اورجینال', 'تحویل فوری', 'ضمانت اصالت'],
   design: ['دسترسی کامل', 'تحویل فوری', 'پشتیبانی فنی'],
+  os: ['تحویل فوری', 'پشتیبانی کامل'],
+  office: ['تحویل فوری', 'پشتیبانی کامل'],
+  security: ['تحویل فوری', 'پشتیبانی کامل'],
+  dev: ['تحویل فوری', 'پشتیبانی کامل'],
   social: ['فعال‌سازی فوری', 'حساب شخصی', 'پشتیبانی کامل'],
   other: ['تحویل فوری', 'ضمانت اصالت', 'پشتیبانی کامل'],
 }
@@ -72,6 +93,10 @@ const CATEGORY_STYLE: Record<ProductCategory, { emoji: string; gradient: string 
   ai: { emoji: '🤖', gradient: 'from-violet-500 via-purple-500 to-indigo-500' },
   gaming: { emoji: '🎮', gradient: 'from-sky-500 via-blue-500 to-indigo-500' },
   design: { emoji: '🎨', gradient: 'from-fuchsia-500 via-pink-500 to-rose-500' },
+  os: { emoji: '💻', gradient: 'from-sky-500 to-blue-700' },
+  office: { emoji: '📋', gradient: 'from-orange-500 to-amber-600' },
+  security: { emoji: '🛡️', gradient: 'from-emerald-500 to-teal-700' },
+  dev: { emoji: '⌨️', gradient: 'from-indigo-500 to-slate-700' },
   social: { emoji: '✈️', gradient: 'from-sky-400 via-cyan-400 to-blue-500' },
   other: { emoji: '💻', gradient: 'from-brand-500 to-brand-700' },
 }
@@ -2070,51 +2095,6 @@ const BRAND_NAME_MATCHERS = BRANDS.map((brand) => ({
   needle: brand.name.replace(/[\u200c\u200e\u200f\s]/g, ''),
 })).sort((a, b) => b.needle.length - a.needle.length)
 
-/** Category hints used when the provider files a product under «other». */
-const CATEGORY_KEYWORDS: Array<{ tokens: string[]; category: ProductCategory }> = [
-  {
-    tokens: ['ai', 'gpt', 'llm', 'chatbot', 'image generator', 'text to video', 'ai tools'],
-    category: 'ai',
-  },
-  {
-    tokens: ['streaming', 'music', 'movie', 'series', 'tv', 'anime', 'podcast'],
-    category: 'streaming',
-  },
-  {
-    tokens: ['in game', 'v bucks', 'top up', 'game pass', 'gaming'],
-    category: 'gaming',
-  },
-  {
-    tokens: ['design', 'template', 'photo editor', 'video editor', 'mockup', 'font'],
-    category: 'design',
-  },
-  {
-    tokens: ['followers', 'likes', 'views', 'verification', 'social media', 'booster'],
-    category: 'social',
-  },
-  {
-    tokens: ['vpn', 'antivirus', 'security', 'password', 'key', 'license'],
-    category: 'other',
-  },
-]
-
-function resolveCategory(
-  title: string,
-  subtitle: string | undefined,
-  provided: ProductCategory,
-): ProductCategory {
-  if (provided !== 'other') return provided
-
-  const text = normalize(`${title} ${subtitle ?? ''}`)
-  const brandCategory = matchBrand(text)?.category
-  if (brandCategory) return brandCategory
-
-  return (
-    CATEGORY_KEYWORDS.find((entry) => entry.tokens.some((token) => hasToken(text, token)))
-      ?.category ?? 'other'
-  )
-}
-
 const TIER_RULES: Array<{ tokens: string[]; label: string }> = [
   { tokens: ['ultimate'], label: 'اولتیمیت' },
   { tokens: ['premium', 'prem'], label: 'پریمیوم' },
@@ -2642,14 +2622,15 @@ function resolveGradient(
 export function localizeProviderProduct(product: AccountProduct): AccountProduct {
   const text = normalize(`${product.title} ${product.subtitle ?? ''}`)
   const brand = matchBrand(text)
-  // The provider files many brands under «other»; the title usually knows better.
-  const category = resolveCategory(product.title, product.subtitle, product.category)
+  const providerTitle = product.providerTitle ?? product.title
+  const category = product.customCategory ?? classifyProduct(providerTitle)
   const title = localizeTitle(product.title, category)
-  const description = localizeDescription(product.description, category, title, brand)
+  const description = product.faDescription ?? localizeDescription(product.description, category, title, brand)
   const rawDescription = product.description?.trim()
 
   return {
     ...product,
+    providerTitle,
     category,
     title,
     subtitle: localizeSubtitle(product.subtitle, category),
