@@ -1,25 +1,3 @@
-/**
- * Cloudflare Pages Function — GET /api/products
- *
- * The Mini App catalogue, served from D1. `/api/sync` persists products that
- * already passed through `localizeProviderProduct`; this endpoint runs the
- * mapper once more on the way out so rows stored before the dictionary existed
- * (or before a mapper update) still arrive with Persian copy, brand emojis and
- * gradients. The pass is idempotent: it reuses the stored brand key, title and
- * emoji instead of re-deriving them from scratch.
- *
- * Response matches the provider envelope the client already understands:
- *   { success: true, data: AccountProduct[], meta: { count, usdtRate, … } }
- *
- * `logoUrl` is never persisted: the mapper re-derives it from the brand on every
- * read, so the D1 schema stays unchanged and a dictionary logo update applies
- * without a migration or re-sync.
- *
- * Bindings: `DB` (D1). No auth — the catalogue is public, like the storefront.
- */
-
-import { localizeProviderProduct } from '../../src/lib/providerMapper'
-import { classifyProduct } from '../../src/lib/productCategories'
 import type { AccountProduct, ProductCategory } from '../../src/types'
 
 interface D1Result<T> {
@@ -51,13 +29,12 @@ interface ProductRow {
   title: string
   provider_title: string | null
   subtitle: string | null
-  category: string | null
+  category: ProductCategory | null
   price: number
   old_price: number | null
   provider_price: number | null
   provider_old_price: number | null
   provider_currency: string | null
-  currency: string | null
   stock: number | null
   rating: number | null
   review_count: number | null
@@ -69,6 +46,7 @@ interface ProductRow {
   emoji: string | null
   brand_key: string | null
   provider_description: string | null
+  logo_url: string | null
   override_product_id: string | null
   fa_description: string | null
   custom_category: ProductCategory | null
@@ -153,14 +131,13 @@ function parseFeatures(raw: string | null): string[] | undefined {
   }
 }
 
-/** D1 row → AccountProduct, then one idempotent dictionary pass. */
 function toProduct(row: ProductRow): AccountProduct {
-  const product = localizeProviderProduct({
+  return {
     id: row.id,
     title: row.title,
     providerTitle: row.provider_title ?? row.title,
     subtitle: row.subtitle ?? undefined,
-    category: row.custom_category ?? classifyProduct(row.provider_title ?? row.title),
+    category: row.custom_category ?? row.category ?? 'other',
     customCategory: row.custom_category ?? undefined,
     faDescription: row.fa_description ?? undefined,
     price: finiteNumber(row.price) ?? 0,
@@ -174,20 +151,13 @@ function toProduct(row: ProductRow): AccountProduct {
     reviewCount: finiteNumber(row.review_count),
     badge: row.badge ?? undefined,
     deliveryTime: row.delivery_time ?? undefined,
-    description: row.description ?? undefined,
+    description: row.fa_description ?? row.description ?? undefined,
     providerDescription: row.provider_description ?? undefined,
     features: parseFeatures(row.features),
     gradient: row.gradient ?? undefined,
     emoji: row.emoji ?? undefined,
     brandKey: row.brand_key ?? undefined,
-  })
-
-  return {
-    ...product,
-    category: row.custom_category ?? classifyProduct(row.provider_title ?? row.title),
-    description: row.fa_description ?? product.description,
-    ...(row.custom_category !== null ? { customCategory: row.custom_category } : {}),
-    ...(row.fa_description !== null ? { faDescription: row.fa_description } : {}),
+    logoUrl: row.logo_url ?? undefined,
     ...(row.override_product_id !== null
       ? { isFeatured: row.is_featured === 1, isBestseller: row.is_bestseller === 1 }
       : {}),
@@ -207,11 +177,18 @@ export async function onRequestGet(context: PagesContext): Promise<Response> {
     let rows: ProductRow[]
     try {
       const result = await db
-        .prepare(`SELECT products.*, product_overrides.product_id AS override_product_id,
+        .prepare(`SELECT products.id, products.title, products.provider_title, products.subtitle,
+                         products.category, products.price, products.old_price,
+                         products.provider_price, products.provider_old_price, products.provider_currency,
+                         products.stock, products.rating, products.review_count, products.badge,
+                         products.delivery_time, products.description, products.provider_description,
+                         products.features, products.gradient, products.emoji, products.brand_key,
+                         products.logo_url, product_overrides.product_id AS override_product_id,
                          product_overrides.fa_description, product_overrides.custom_category,
                          product_overrides.is_featured, product_overrides.is_bestseller
                   FROM products
                   LEFT JOIN product_overrides ON product_overrides.product_id = products.id
+                  WHERE COALESCE(product_overrides.is_deleted, 0) = 0
                   ORDER BY products.title COLLATE NOCASE`)
         .all<ProductRow>()
       if (result.success === false || !Array.isArray(result.results)) {

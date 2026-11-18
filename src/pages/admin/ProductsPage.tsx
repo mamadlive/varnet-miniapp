@@ -38,7 +38,7 @@ import { formatCount, formatCurrency, toPersianDigits } from '@/lib/format'
 import { fa } from '@/lib/i18n'
 import { isApiError } from '@/services/apiClient'
 import { listAccountProducts, syncAccountProducts } from '@/services/accounts.service'
-import { saveProductOverride } from '@/services/admin.service'
+import { deleteAdminProducts, saveProductOverride } from '@/services/admin.service'
 import { TEST_PRODUCT_IDS } from '@/services/mocks'
 import { useAdminStore } from '@/store/adminStore'
 import type { AccountProduct, DiscountType, ProductCategory } from '@/types'
@@ -69,13 +69,15 @@ export default function ProductsPage() {
     message: string
   } | null>(null)
   const [syncError, setSyncError] = useState<string | null>(null)
+  const [deleting, setDeleting] = useState(false)
+  const [deleteError, setDeleteError] = useState<string | null>(null)
+  const deletingRef = useRef(false)
 
   const margins = useAdminStore((state) => state.margins)
   const setMargin = useAdminStore((state) => state.setMargin)
   const hiddenProductIds = useAdminStore((state) => state.hiddenProductIds)
   const toggleProductHidden = useAdminStore((state) => state.toggleProductHidden)
   const deleteProduct = useAdminStore((state) => state.deleteProduct)
-  const deleteTestProducts = useAdminStore((state) => state.deleteTestProducts)
   const productNotes = useAdminStore((state) => state.productNotes)
   const setProductNote = useAdminStore((state) => state.setProductNote)
   const usdtRateToman = useAdminStore((state) =>
@@ -208,23 +210,39 @@ export default function ProductsPage() {
     closeMarginEditor()
   }
 
+  const deleteProducts = async (ids: string[]) => {
+    if (deletingRef.current) return
+    deletingRef.current = true
+    setDeleting(true)
+    setDeleteError(null)
+    try {
+      await deleteAdminProducts(ids)
+      ids.forEach(deleteProduct)
+      const deleted = new Set(ids)
+      setProducts((current) => current.filter((product) => !deleted.has(product.id)))
+    } catch (err) {
+      setDeleteError(errorMessage(err, 'حذف محصولات انجام نشد.'))
+    } finally {
+      deletingRef.current = false
+      setDeleting(false)
+    }
+  }
+
   const handleDeleteProduct = (product: AccountProduct) => {
+    if (deletingRef.current) return
     const confirmed = window.confirm(
       `محصول «${product.title}» برای همیشه حذف شود؟\nاین عمل قابل بازگشت نیست و با همگام‌سازی مجدد هم برنمی‌گردد.`,
     )
-    if (!confirmed) return
-    deleteProduct(product.id)
-    setProducts((current) => current.filter((item) => item.id !== product.id))
+    if (confirmed) void deleteProducts([product.id])
   }
 
   const handleDeleteTestProducts = () => {
-    if (testProductCount === 0) return
+    if (deletingRef.current || testProductCount === 0) return
+    const ids = products.filter((product) => TEST_PRODUCT_IDS.includes(product.id)).map((product) => product.id)
     const confirmed = window.confirm(
-      `${formatCount(testProductCount)} محصول نمونه (داده‌های آزمایشی) حذف شود؟\nاین عمل قابل بازگشت نیست.`,
+      `${formatCount(ids.length)} محصول نمونه (داده‌های آزمایشی) حذف شود؟\nاین عمل قابل بازگشت نیست.`,
     )
-    if (!confirmed) return
-    deleteTestProducts()
-    setProducts((current) => current.filter((product) => !TEST_PRODUCT_IDS.includes(product.id)))
+    if (confirmed) void deleteProducts(ids)
   }
 
   const marginPreviewBase = marginProduct ? basePriceOf(marginProduct) : 0
@@ -507,7 +525,7 @@ export default function ProductsPage() {
             variant="secondary"
             size="sm"
             aria-label={`ویرایش محصول ${product.title}`}
-            disabled={savingProduct || syncing || loading}
+            disabled={savingProduct || syncing || loading || deleting}
             onClick={() => openProductEditor(product)}
           >
             ویرایش
@@ -542,6 +560,7 @@ export default function ProductsPage() {
             className="size-8 rounded-lg text-tg-destructive hover:bg-rose-500/10"
             aria-label={`حذف ${product.title}`}
             title="حذف محصول"
+            disabled={deleting || syncing || loading || savingProduct}
             onClick={() => handleDeleteProduct(product)}
           >
             <Trash2 className="size-3.5" aria-hidden />
@@ -573,7 +592,7 @@ export default function ProductsPage() {
               size="sm"
               leftIcon={<CloudDownload className="size-4" />}
               loading={syncing}
-              disabled={savingProduct || loading}
+              disabled={savingProduct || loading || deleting}
               onClick={() => void handleSync()}
             >
               همگام‌سازی محصولات
@@ -583,7 +602,7 @@ export default function ProductsPage() {
               size="sm"
               leftIcon={<RefreshCw className="size-4" />}
               loading={loading}
-              disabled={savingProduct || syncing}
+              disabled={savingProduct || syncing || deleting}
               onClick={refresh}
             >
               {fa.common.refresh}
@@ -594,6 +613,7 @@ export default function ProductsPage() {
                 size="sm"
                 className="text-tg-destructive hover:bg-rose-500/10"
                 leftIcon={<Trash2 className="size-4" />}
+                disabled={deleting || syncing || loading || savingProduct}
                 onClick={handleDeleteTestProducts}
               >
                 حذف محصولات نمونه ({formatCount(testProductCount)})
@@ -616,6 +636,12 @@ export default function ProductsPage() {
         >
           <CheckCircle2 className="mt-0.5 size-4 shrink-0" aria-hidden />
           <p>{syncNotice.message}</p>
+        </div>
+      ) : null}
+
+      {deleteError ? (
+        <div role="alert" className="rounded-xl border border-rose-500/30 bg-rose-500/10 px-4 py-3 text-[12.5px] text-rose-700">
+          {deleteError}
         </div>
       ) : null}
 

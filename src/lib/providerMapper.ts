@@ -2279,10 +2279,22 @@ function hasToken(text: string, token: string): boolean {
   return tokenIndex(text, token) >= 0
 }
 
+function isAsciiAlphanumeric(code: number): boolean {
+  return (code >= 97 && code <= 122) || (code >= 48 && code <= 57)
+}
+
 function tokenIndex(text: string, token: string): number {
-  const escaped = token.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
-  const match = new RegExp(`(^|[^a-z0-9])${escaped}([^a-z0-9]|$)`).exec(text)
-  return match ? match.index : -1
+  let index = text.indexOf(token)
+  while (index !== -1) {
+    const before = index === 0 || !isAsciiAlphanumeric(text.charCodeAt(index - 1))
+    const end = index + token.length
+    const after = end === text.length || !isAsciiAlphanumeric(text.charCodeAt(end))
+    // The old regex consumed the leading delimiter, so its index precedes the token.
+    if (before && after) return index === 0 ? 0 : index - 1
+    if (index === text.length) break
+    index = text.indexOf(token, index + 1)
+  }
+  return -1
 }
 
 function matchBrand(text: string): BrandRule | undefined {
@@ -2423,12 +2435,17 @@ function englishFallbackTitle(raw: string): string {
   return cleaned || raw.trim()
 }
 
-function localizeTitle(raw: string, category: ProductCategory): string {
+function localizeTitle(
+  raw: string,
+  category: ProductCategory,
+  combinedText: string,
+  combinedBrand: BrandRule | undefined,
+): string {
   if (!raw.trim()) return CATEGORY_TITLES[category]
   if (PERSIAN_RE.test(raw) && !LATIN_RE.test(raw)) return raw.trim()
 
   const text = normalize(raw)
-  const brand = matchBrand(text)
+  const brand = text === combinedText ? combinedBrand : matchBrand(text)
   const tiers = matchTiers(text)
   // "YouTube Premium Family" implies Premium in the brand name; keep Family.
   const explicitTiers = tiers.filter((tier) => !brand?.name.includes(tier))
@@ -2484,11 +2501,23 @@ function replaceTerm(text: string, source: string, target: string): string {
   return text.replace(new RegExp(`${escaped}${suffix}`, 'gi'), target)
 }
 
+const REPLACEMENT_RULES: ReadonlyArray<readonly [string, string]> = [
+  ...BRAND_ALIASES.map(({ alias, brand }) => [alias, brand.name] as const),
+  ...PHRASE_RULES,
+  ...WORD_RULES,
+]
+
 function replacePhrases(raw: string): string {
   let result = raw
-  for (const { alias, brand } of BRAND_ALIASES) result = replaceTerm(result, alias, brand.name)
-  for (const [source, target] of PHRASE_RULES) result = replaceTerm(result, source, target)
-  for (const [source, target] of WORD_RULES) result = replaceTerm(result, source, target)
+  let lower = result.toLowerCase()
+  for (const [source, target] of REPLACEMENT_RULES) {
+    if (!lower.includes(source)) continue
+    const next = replaceTerm(result, source, target)
+    if (next !== result) {
+      result = next
+      lower = result.toLowerCase()
+    }
+  }
 
   const normalized = result
     .replace(/\s*[,|]\s*/g, ' · ')
@@ -2624,7 +2653,7 @@ export function localizeProviderProduct(product: AccountProduct): AccountProduct
   const brand = matchBrand(text)
   const providerTitle = product.providerTitle ?? product.title
   const category = product.customCategory ?? classifyProduct(providerTitle)
-  const title = localizeTitle(product.title, category)
+  const title = localizeTitle(product.title, category, text, brand)
   const description = product.faDescription ?? localizeDescription(product.description, category, title, brand)
   const rawDescription = product.description?.trim()
 

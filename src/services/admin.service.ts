@@ -80,6 +80,20 @@ export async function saveProductOverride(input: ProductOverrideInput): Promise<
   return payload.data
 }
 
+export async function deleteAdminProducts(productIds: string[]): Promise<void> {
+  const payload = await apiPostProxy<AdminEnvelope<{ productIds: string[] }>>(
+    '/api/admin/products/delete',
+    { productIds },
+    { headers: adminHeaders() },
+  )
+  const returnedIds = payload?.data?.productIds
+  if (payload?.success !== true || !Array.isArray(returnedIds) ||
+      returnedIds.length !== new Set(productIds).size ||
+      productIds.some((id) => !returnedIds.includes(id))) {
+    throw adminFailure(payload, 'حذف محصولات انجام نشد.')
+  }
+}
+
 export async function fetchAdminStats(): Promise<AdminStats> {
   await sleep(200)
   return mockAdminStats

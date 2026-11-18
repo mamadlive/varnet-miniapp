@@ -1,6 +1,22 @@
 {
   "routes": [
     {
+      "routePath": "/api/admin/static-ip/nodes/action",
+      "mountPath": "/api/admin/static-ip/nodes",
+      "method": "POST",
+      "module": [
+        "api/admin/static-ip/nodes/action.ts:onRequestPost"
+      ]
+    },
+    {
+      "routePath": "/api/admin/static-ip/plans/action",
+      "mountPath": "/api/admin/static-ip/plans",
+      "method": "POST",
+      "module": [
+        "api/admin/static-ip/plans/action.ts:onRequestPost"
+      ]
+    },
+    {
       "routePath": "/api/admin/auth/request-otp",
       "mountPath": "/api/admin/auth",
       "method": "POST",
@@ -30,6 +46,14 @@
       "method": "POST",
       "module": [
         "api/admin/orders/action.ts:onRequestPost"
+      ]
+    },
+    {
+      "routePath": "/api/admin/products/override",
+      "mountPath": "/api/admin/products",
+      "method": "POST",
+      "module": [
+        "api/admin/products/override.ts:onRequestPost"
       ]
     },
     {
@@ -70,6 +94,22 @@
       "method": "POST",
       "module": [
         "api/admin/settings/margins.ts:onRequestPost"
+      ]
+    },
+    {
+      "routePath": "/api/admin/static-ip/nodes",
+      "mountPath": "/api/admin/static-ip",
+      "method": "GET",
+      "module": [
+        "api/admin/static-ip/nodes.ts:onRequestGet"
+      ]
+    },
+    {
+      "routePath": "/api/admin/static-ip/plans",
+      "mountPath": "/api/admin/static-ip",
+      "method": "GET",
+      "module": [
+        "api/admin/static-ip/plans.ts:onRequestGet"
       ]
     },
     {
@@ -126,6 +166,54 @@
       "method": "GET",
       "module": [
         "api/provider/products.ts:onRequestGet"
+      ]
+    },
+    {
+      "routePath": "/api/static-ip/download",
+      "mountPath": "/api/static-ip",
+      "method": "GET",
+      "module": [
+        "api/static-ip/download.ts:onRequestGet"
+      ]
+    },
+    {
+      "routePath": "/api/static-ip/download",
+      "mountPath": "/api/static-ip",
+      "method": "POST",
+      "module": [
+        "api/static-ip/download.ts:onRequestPost"
+      ]
+    },
+    {
+      "routePath": "/api/static-ip/nodes",
+      "mountPath": "/api/static-ip",
+      "method": "GET",
+      "module": [
+        "api/static-ip/nodes.ts:onRequestGet"
+      ]
+    },
+    {
+      "routePath": "/api/static-ip/plans",
+      "mountPath": "/api/static-ip",
+      "method": "GET",
+      "module": [
+        "api/static-ip/plans.ts:onRequestGet"
+      ]
+    },
+    {
+      "routePath": "/api/static-ip/resend",
+      "mountPath": "/api/static-ip",
+      "method": "POST",
+      "module": [
+        "api/static-ip/resend.ts:onRequestPost"
+      ]
+    },
+    {
+      "routePath": "/api/static-ip/services",
+      "mountPath": "/api/static-ip",
+      "method": "GET",
+      "module": [
+        "api/static-ip/services.ts:onRequestGet"
       ]
     },
     {

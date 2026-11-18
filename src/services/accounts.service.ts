@@ -4,7 +4,6 @@ import {
   hasMargin,
   type ProfitMargin,
 } from '@/lib/pricing'
-import { localizeProviderProduct } from '@/lib/providerMapper'
 import { ApiError, apiGetProxy, apiPostProxy, isApiError } from '@/services/apiClient'
 import { endpoints } from '@/services/endpoints'
 import { useAdminStore } from '@/store/adminStore'
@@ -112,25 +111,21 @@ function marginForProduct(product: AccountProduct, usdPrice: number): ProfitMarg
   return hasMargin(override) ? override : autoMarginForUsd(usdPrice, marginTiers)
 }
 
-/** Localizes, reprices and decorates a product for display. */
 function withPricing(product: AccountProduct): AccountProduct {
-  // Localizing here as well covers catalogues persisted before the mapper
-  // existed; the mapper is idempotent for already-Persian fixtures.
-  const localized = localizeProviderProduct(product)
   const rate = effectiveUsdtRate()
-  const basePrice = basePriceInToman(localized, rate)
-  const usdPrice = usdPriceOf(localized, basePrice, rate)
-  const margin = marginForProduct(localized, usdPrice)
-  const serverConverted = localized.providerPrice === undefined || localized.providerCurrency !== 'USDT'
+  const basePrice = basePriceInToman(product, rate)
+  const usdPrice = usdPriceOf(product, basePrice, rate)
+  const margin = marginForProduct(product, usdPrice)
+  const serverConverted = product.providerPrice === undefined || product.providerCurrency !== 'USDT'
 
   const oldPrice = serverConverted
-    ? localized.oldPrice
-    : localized.providerOldPrice !== undefined
-      ? Math.round(localized.providerOldPrice * rate)
+    ? product.oldPrice
+    : product.providerOldPrice !== undefined
+      ? Math.round(product.providerOldPrice * rate)
       : undefined
 
   return {
-    ...localized,
+    ...product,
     basePrice,
     usdPrice,
     price: applyProfitMargin(basePrice, margin),
@@ -195,8 +190,7 @@ async function fetchCatalogueFromServer(): Promise<AccountProduct[]> {
 }
 
 /**
- * Persist the latest catalogue to D1 (`POST /api/sync`) and publish it to the
- * shared admin store — the Mini App reads the same store on its next render.
+ * Persist the latest catalogue to D1 (`POST /api/sync`).
  *
  * Server failures propagate with their technical cause (`SYNC_UPSTREAM_TIMEOUT`,
  * `SYNC_DB_WRITE_FAILED`, …) instead of being masked with fixture data.
@@ -222,15 +216,8 @@ export async function syncAccountProducts(): Promise<AccountCatalogSyncResult> {
   const rate = data.usdtRate ?? payload.meta?.usdtRate
   if (rate) useAdminStore.getState().setServerUsdtRateToman(rate)
 
-  const { deletedProductIds, setProducts } = useAdminStore.getState()
-  // A product the admin deleted must stay deleted across provider re-syncs.
-  const kept = data.products
-    .map(localizeProviderProduct)
-    .filter((product) => !deletedProductIds.includes(product.id))
-  setProducts(kept)
-
   return {
-    products: kept,
+    products: data.products,
     skipped: data.skipped ?? payload.meta?.skipped ?? 0,
     fetchedAt: data.syncedAt ?? payload.meta?.fetchedAt ?? new Date().toISOString(),
   }

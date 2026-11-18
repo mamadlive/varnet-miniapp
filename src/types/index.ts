@@ -84,7 +84,7 @@ export interface AccountProduct {
   gradient?: string
   /** Emoji used as fallback artwork when no brand logo is available. */
   emoji?: string
-  /** Real brand logo resolved by the provider mapper (favicon CDN), mapped at run time. */
+  /** Brand logo resolved during provider synchronization. */
   logoUrl?: string
   /** Stable brand identifier resolved by the provider mapper (`netflix`, `chatgpt`, …). */
   brandKey?: string

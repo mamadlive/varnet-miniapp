@@ -128,6 +128,41 @@ async function verifySessionToken(token, botToken) {
   }
 }
 __name(verifySessionToken, "verifySessionToken");
+async function createStaticIpDownloadToken(telegramId, orderId, botToken) {
+  const payload = base64UrlEncode(new TextEncoder().encode(JSON.stringify({
+    sub: telegramId,
+    orderId,
+    exp: Math.floor(Date.now() / 1e3) + 120
+  })));
+  const signature = base64UrlEncode(new Uint8Array(await hmacSha256(
+    new TextEncoder().encode(botToken),
+    `varnet-static-ip-download-v1.${payload}`
+  )));
+  return `${payload}.${signature}`;
+}
+__name(createStaticIpDownloadToken, "createStaticIpDownloadToken");
+async function verifyStaticIpDownloadToken(token, orderId, botToken) {
+  const [payload, signature, extra] = token.split(".");
+  if (!payload || !signature || extra || token.length > 2048) return null;
+  const expected = base64UrlEncode(new Uint8Array(await hmacSha256(
+    new TextEncoder().encode(botToken),
+    `varnet-static-ip-download-v1.${payload}`
+  )));
+  if (!timingSafeEqual(expected, signature)) return null;
+  const bytes = base64UrlDecode(payload);
+  if (!bytes) return null;
+  try {
+    const data = JSON.parse(new TextDecoder().decode(bytes));
+    const now = Math.floor(Date.now() / 1e3);
+    if (!Number.isSafeInteger(data.sub) || Number(data.sub) <= 0 || data.orderId !== orderId || !Number.isInteger(data.exp) || Number(data.exp) <= now || Number(data.exp) > now + 120) {
+      return null;
+    }
+    return Number(data.sub);
+  } catch {
+    return null;
+  }
+}
+__name(verifyStaticIpDownloadToken, "verifyStaticIpDownloadToken");
 var ADMIN_SESSION_VERSION = "a1";
 var ADMIN_SESSION_TTL_SECONDS = 12 * 60 * 60;
 async function adminSessionKey(botToken) {
@@ -200,6 +235,33 @@ function failure(status, code, message, extra) {
   return jsonResponse({ success: false, code, message, ...extra ? { data: extra } : {} }, status);
 }
 __name(failure, "failure");
+function describeCause(cause) {
+  if (cause === void 0 || cause === null) return null;
+  if (cause instanceof Error) return cause.message || cause.name;
+  if (typeof cause === "string") return cause;
+  try {
+    return JSON.stringify(cause);
+  } catch {
+    return String(cause);
+  }
+}
+__name(describeCause, "describeCause");
+function internalFailure(cause, code = "INTERNAL_ERROR") {
+  const message = cause instanceof Error && cause.message ? cause.message : "\u062E\u0637\u0627\u06CC \u062F\u0627\u062E\u0644\u06CC \u0633\u0631\u0648\u0631 \u0631\u062E \u062F\u0627\u062F. \u062F\u0648\u0628\u0627\u0631\u0647 \u062A\u0644\u0627\u0634 \u06A9\u0646\u06CC\u062F.";
+  return jsonResponse(
+    {
+      success: false,
+      code,
+      message,
+      error: {
+        message: cause instanceof Error ? cause.message || cause.name : String(cause),
+        cause: cause instanceof Error ? describeCause(cause.cause) : null
+      }
+    },
+    500
+  );
+}
+__name(internalFailure, "internalFailure");
 async function hasAdminRole(db, telegramId) {
   try {
     const row = await db.prepare("SELECT role FROM users WHERE telegram_id = ?").bind(telegramId).first();
@@ -332,6 +394,381 @@ function parseMarginTiers(value) {
 }
 __name(parseMarginTiers, "parseMarginTiers");
 
+// api/admin/static-ip/nodes.ts
+function toAdminNode(row) {
+  return {
+    id: row.id,
+    name: row.name,
+    ip: row.ip,
+    country: row.country,
+    countryCode: row.country_code,
+    protocol: row.protocol,
+    price: Number(row.price),
+    currency: "IRT",
+    durationDays: Number(row.duration_days),
+    dataCapGb: Number(row.data_cap_gb),
+    availability: row.availability,
+    enabled: Number(row.is_enabled) === 1,
+    sortOrder: Number(row.sort_order),
+    createdAt: row.created_at,
+    updatedAt: row.updated_at
+  };
+}
+__name(toAdminNode, "toAdminNode");
+async function onRequestGet(context) {
+  try {
+    const auth = await authenticateAdmin(context.request, context.env);
+    if (!auth.ok) return failure(auth.status, auth.code, auth.message);
+    const db = context.env.DB;
+    const result = await db.prepare(
+      `SELECT id, name, ip, country, country_code, protocol, price, currency,
+                duration_days, data_cap_gb, availability, is_enabled, sort_order,
+                created_at, updated_at
+         FROM static_ip_nodes
+         ORDER BY sort_order ASC, created_at ASC`
+    ).all();
+    const rows = result.results ?? [];
+    return jsonResponse({
+      success: true,
+      data: rows.map(toAdminNode),
+      meta: { count: rows.length }
+    });
+  } catch (cause) {
+    return internalFailure(cause, "STATIC_IP_NODES_READ_FAILED");
+  }
+}
+__name(onRequestGet, "onRequestGet");
+
+// api/admin/static-ip/nodes/action.ts
+var MAX_PRICE = 1e8;
+var AVAILABILITY = /* @__PURE__ */ new Set(["in_stock", "coming_soon", "sold_out"]);
+var IPV4 = /^(25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)(\.(25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)){3}$/;
+var SELECT_COLUMNS = `id, name, ip, country, country_code, protocol, price, currency,
+  duration_days, data_cap_gb, availability, is_enabled, sort_order, created_at, updated_at`;
+async function readNode(db, id) {
+  return db.prepare(`SELECT ${SELECT_COLUMNS} FROM static_ip_nodes WHERE id = ?`).bind(id).first();
+}
+__name(readNode, "readNode");
+function intInRange(value, min, max) {
+  const parsed = Number(value);
+  if (!Number.isInteger(parsed) || parsed < min || parsed > max) return null;
+  return parsed;
+}
+__name(intInRange, "intInRange");
+async function onRequestPost(context) {
+  try {
+    const auth = await authenticateAdmin(context.request, context.env);
+    if (!auth.ok) return failure(auth.status, auth.code, auth.message);
+    let raw;
+    try {
+      raw = await context.request.text();
+    } catch {
+      return failure(400, "INVALID_BODY", "\u0628\u062F\u0646\u0647 \u062F\u0631\u062E\u0648\u0627\u0633\u062A \u0642\u0627\u0628\u0644 \u062E\u0648\u0627\u0646\u062F\u0646 \u0646\u0628\u0648\u062F.");
+    }
+    if (raw.length > 8192) return failure(413, "INVALID_BODY", "\u062F\u0631\u062E\u0648\u0627\u0633\u062A \u0628\u06CC\u0634 \u0627\u0632 \u062D\u062F \u0628\u0632\u0631\u06AF \u0627\u0633\u062A.");
+    let body;
+    try {
+      const parsed = JSON.parse(raw);
+      if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+        return failure(400, "INVALID_BODY", "\u0633\u0627\u062E\u062A\u0627\u0631 \u062F\u0631\u062E\u0648\u0627\u0633\u062A \u0646\u0627\u0645\u0639\u062A\u0628\u0631 \u0627\u0633\u062A.");
+      }
+      body = parsed;
+    } catch {
+      return failure(400, "INVALID_BODY", "\u0633\u0627\u062E\u062A\u0627\u0631 \u062F\u0631\u062E\u0648\u0627\u0633\u062A \u0646\u0627\u0645\u0639\u062A\u0628\u0631 \u0627\u0633\u062A.");
+    }
+    const db = context.env.DB;
+    const action = typeof body.action === "string" ? body.action : "";
+    const nodeId = typeof body.nodeId === "string" ? body.nodeId.trim() : "";
+    const now = (/* @__PURE__ */ new Date()).toISOString();
+    if (action === "toggle") {
+      if (!nodeId) return failure(400, "INVALID_NODE", "\u0634\u0646\u0627\u0633\u0647 \u0646\u0648\u062F \u0627\u0631\u0633\u0627\u0644 \u0646\u0634\u062F\u0647 \u0627\u0633\u062A.");
+      const existing2 = await readNode(db, nodeId);
+      if (!existing2) return failure(404, "NODE_NOT_FOUND", "\u0646\u0648\u062F \u0645\u0648\u0631\u062F\u0646\u0638\u0631 \u067E\u06CC\u062F\u0627 \u0646\u0634\u062F.");
+      const nextEnabled = Number(existing2.is_enabled) === 1 ? 0 : 1;
+      await db.prepare("UPDATE static_ip_nodes SET is_enabled = ?, updated_at = ? WHERE id = ?").bind(nextEnabled, now, nodeId).run();
+      const updated = await readNode(db, nodeId);
+      return jsonResponse({
+        success: true,
+        message: nextEnabled === 1 ? "\u0646\u0648\u062F \u0641\u0639\u0627\u0644 \u0634\u062F \u0648 \u062F\u0631 \u0645\u06CC\u0646\u06CC\u200C\u0627\u067E \u0646\u0645\u0627\u06CC\u0634 \u062F\u0627\u062F\u0647 \u0645\u06CC\u200C\u0634\u0648\u062F." : "\u0646\u0648\u062F \u063A\u06CC\u0631\u0641\u0639\u0627\u0644 \u0634\u062F \u0648 \u0627\u0632 \u0645\u06CC\u0646\u06CC\u200C\u0627\u067E \u0645\u062E\u0641\u06CC \u0634\u062F.",
+        data: updated ? toAdminNode(updated) : null
+      });
+    }
+    if (action !== "save") {
+      return failure(400, "INVALID_ACTION", "\u0639\u0645\u0644\u06CC\u0627\u062A \u062F\u0631\u062E\u0648\u0627\u0633\u062A\u06CC \u067E\u0634\u062A\u06CC\u0628\u0627\u0646\u06CC \u0646\u0645\u06CC\u200C\u0634\u0648\u062F.");
+    }
+    const name = typeof body.name === "string" ? body.name.trim() : "";
+    const ip = typeof body.ip === "string" ? body.ip.trim() : "";
+    const country = typeof body.country === "string" ? body.country.trim() : "";
+    const countryCode = typeof body.countryCode === "string" ? body.countryCode.trim().toUpperCase() : "";
+    const price = intInRange(body.price, 0, MAX_PRICE);
+    const durationDays = intInRange(body.durationDays, 1, 3650);
+    const dataCapGb = intInRange(body.dataCapGb, 1, 1e5);
+    const availability = typeof body.availability === "string" ? body.availability : "";
+    const sortOrder = body.sortOrder === void 0 ? 100 : intInRange(body.sortOrder, 0, 1e5);
+    const enabled = body.enabled === void 0 ? true : body.enabled === true;
+    if (name.length < 2 || name.length > 80) {
+      return failure(400, "INVALID_NAME", "\u0646\u0627\u0645 \u0646\u0648\u062F \u0628\u0627\u06CC\u062F \u0628\u06CC\u0646 \u06F2 \u062A\u0627 \u06F8\u06F0 \u0646\u0648\u06CC\u0633\u0647 \u0628\u0627\u0634\u062F.");
+    }
+    if (!IPV4.test(ip)) {
+      return failure(400, "INVALID_IP", "\u0646\u0634\u0627\u0646\u06CC IPv4 \u0646\u0648\u062F \u0645\u0639\u062A\u0628\u0631 \u0646\u06CC\u0633\u062A.");
+    }
+    if (country.length < 2 || country.length > 60) {
+      return failure(400, "INVALID_COUNTRY", "\u0646\u0627\u0645 \u06A9\u0634\u0648\u0631 \u0631\u0627 \u06A9\u0627\u0645\u0644 \u0648\u0627\u0631\u062F \u06A9\u0646\u06CC\u062F.");
+    }
+    if (!/^[A-Z]{2}$/.test(countryCode)) {
+      return failure(400, "INVALID_COUNTRY_CODE", "\u06A9\u062F \u06A9\u0634\u0648\u0631 \u0628\u0627\u06CC\u062F \u062F\u0648 \u062D\u0631\u0641 \u0644\u0627\u062A\u06CC\u0646 \u0628\u0627\u0634\u062F (\u0645\u062B\u0644\u0627\u064B DE).");
+    }
+    if (price === null) {
+      return failure(400, "INVALID_PRICE", "\u0642\u06CC\u0645\u062A \u0646\u0648\u062F \u0645\u0639\u062A\u0628\u0631 \u0646\u06CC\u0633\u062A.");
+    }
+    if (durationDays === null) {
+      return failure(400, "INVALID_DURATION", "\u0645\u062F\u062A \u0627\u0639\u062A\u0628\u0627\u0631 \u0628\u0627\u06CC\u062F \u0628\u06CC\u0646 \u06F1 \u062A\u0627 \u06F3\u06F6\u06F5\u06F0 \u0631\u0648\u0632 \u0628\u0627\u0634\u062F.");
+    }
+    if (dataCapGb === null) {
+      return failure(400, "INVALID_QUOTA", "\u062D\u062C\u0645 \u0633\u0631\u0648\u06CC\u0633 \u0645\u0639\u062A\u0628\u0631 \u0646\u06CC\u0633\u062A.");
+    }
+    if (!AVAILABILITY.has(availability)) {
+      return failure(400, "INVALID_AVAILABILITY", "\u0648\u0636\u0639\u06CC\u062A \u0646\u0648\u062F \u0628\u0627\u06CC\u062F \xAB\u0645\u0648\u062C\u0648\u062F\xBB\u060C \xAB\u0628\u0647\u200C\u0632\u0648\u062F\u06CC\xBB \u06CC\u0627 \xAB\u0646\u0627\u0645\u0648\u062C\u0648\u062F\xBB \u0628\u0627\u0634\u062F.");
+    }
+    if (sortOrder === null) {
+      return failure(400, "INVALID_SORT", "\u062A\u0631\u062A\u06CC\u0628 \u0646\u0645\u0627\u06CC\u0634 \u0645\u0639\u062A\u0628\u0631 \u0646\u06CC\u0633\u062A.");
+    }
+    const id = nodeId || `node_${crypto.randomUUID()}`;
+    const existing = nodeId ? await readNode(db, nodeId) : null;
+    if (nodeId && !existing) return failure(404, "NODE_NOT_FOUND", "\u0646\u0648\u062F \u0645\u0648\u0631\u062F\u0646\u0638\u0631 \u067E\u06CC\u062F\u0627 \u0646\u0634\u062F.");
+    if (existing) {
+      await db.prepare(
+        `UPDATE static_ip_nodes
+           SET name = ?, ip = ?, country = ?, country_code = ?, price = ?,
+               duration_days = ?, data_cap_gb = ?, availability = ?, is_enabled = ?,
+               sort_order = ?, updated_at = ?
+           WHERE id = ?`
+      ).bind(
+        name,
+        ip,
+        country,
+        countryCode,
+        price,
+        durationDays,
+        dataCapGb,
+        availability,
+        enabled ? 1 : 0,
+        sortOrder,
+        now,
+        id
+      ).run();
+    } else {
+      await db.prepare(
+        `INSERT INTO static_ip_nodes
+             (id, name, ip, country, country_code, protocol, price, currency,
+              duration_days, data_cap_gb, availability, is_enabled, sort_order,
+              created_at, updated_at)
+           VALUES (?, ?, ?, ?, ?, 'OpenVPN (UDP)', ?, 'IRT', ?, ?, ?, ?, ?, ?, ?)`
+      ).bind(
+        id,
+        name,
+        ip,
+        country,
+        countryCode,
+        price,
+        durationDays,
+        dataCapGb,
+        availability,
+        enabled ? 1 : 0,
+        sortOrder,
+        now,
+        now
+      ).run();
+    }
+    const saved = await readNode(db, id);
+    return jsonResponse({
+      success: true,
+      message: existing ? "\u062A\u063A\u06CC\u06CC\u0631\u0627\u062A \u0646\u0648\u062F \u0630\u062E\u06CC\u0631\u0647 \u0634\u062F." : "\u0646\u0648\u062F \u062C\u062F\u06CC\u062F \u0633\u0627\u062E\u062A\u0647 \u0634\u062F.",
+      data: saved ? toAdminNode(saved) : null
+    });
+  } catch (cause) {
+    return internalFailure(cause, "STATIC_IP_NODE_WRITE_FAILED");
+  }
+}
+__name(onRequestPost, "onRequestPost");
+
+// api/admin/static-ip/plans.ts
+var PLAN_SELECT = `SELECT p.id, p.node_id, p.name, p.data_cap_gb, p.duration_days,
+    p.price, p.currency, p.is_enabled, p.sort_order, p.created_at, p.updated_at,
+    n.name AS node_name, n.country, n.country_code, n.protocol, n.availability
+  FROM static_ip_plans p
+  JOIN static_ip_nodes n ON n.id = p.node_id`;
+function toAdminPlan(row) {
+  return {
+    id: row.id,
+    nodeId: row.node_id,
+    name: row.name,
+    dataCapGb: Number(row.data_cap_gb),
+    durationDays: Number(row.duration_days),
+    price: Number(row.price),
+    currency: "IRT",
+    enabled: Number(row.is_enabled) === 1,
+    sortOrder: Number(row.sort_order),
+    nodeName: row.node_name,
+    country: row.country,
+    countryCode: row.country_code,
+    protocol: row.protocol,
+    availability: row.availability,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at
+  };
+}
+__name(toAdminPlan, "toAdminPlan");
+async function onRequestGet2(context) {
+  try {
+    const auth = await authenticateAdmin(context.request, context.env);
+    if (!auth.ok) return failure(auth.status, auth.code, auth.message);
+    const db = context.env.DB;
+    const result = await db.prepare(`${PLAN_SELECT} ORDER BY p.sort_order ASC, p.created_at ASC`).all();
+    const rows = result.results ?? [];
+    return jsonResponse({
+      success: true,
+      data: rows.map(toAdminPlan),
+      meta: { count: rows.length }
+    });
+  } catch (cause) {
+    return internalFailure(cause, "STATIC_IP_PLANS_READ_FAILED");
+  }
+}
+__name(onRequestGet2, "onRequestGet");
+
+// api/admin/static-ip/plans/action.ts
+var MAX_PRICE2 = 1e8;
+async function readPlan(db, id) {
+  return db.prepare(`${PLAN_SELECT} WHERE p.id = ?`).bind(id).first();
+}
+__name(readPlan, "readPlan");
+function intInRange2(value, min, max) {
+  const parsed = Number(value);
+  if (!Number.isInteger(parsed) || parsed < min || parsed > max) return null;
+  return parsed;
+}
+__name(intInRange2, "intInRange");
+async function onRequestPost2(context) {
+  try {
+    const auth = await authenticateAdmin(context.request, context.env);
+    if (!auth.ok) return failure(auth.status, auth.code, auth.message);
+    let raw;
+    try {
+      raw = await context.request.text();
+    } catch {
+      return failure(400, "INVALID_BODY", "\u0628\u062F\u0646\u0647 \u062F\u0631\u062E\u0648\u0627\u0633\u062A \u0642\u0627\u0628\u0644 \u062E\u0648\u0627\u0646\u062F\u0646 \u0646\u0628\u0648\u062F.");
+    }
+    if (raw.length > 8192) return failure(413, "INVALID_BODY", "\u062F\u0631\u062E\u0648\u0627\u0633\u062A \u0628\u06CC\u0634 \u0627\u0632 \u062D\u062F \u0628\u0632\u0631\u06AF \u0627\u0633\u062A.");
+    let body;
+    try {
+      const parsed = JSON.parse(raw);
+      if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+        return failure(400, "INVALID_BODY", "\u0633\u0627\u062E\u062A\u0627\u0631 \u062F\u0631\u062E\u0648\u0627\u0633\u062A \u0646\u0627\u0645\u0639\u062A\u0628\u0631 \u0627\u0633\u062A.");
+      }
+      body = parsed;
+    } catch {
+      return failure(400, "INVALID_BODY", "\u0633\u0627\u062E\u062A\u0627\u0631 \u062F\u0631\u062E\u0648\u0627\u0633\u062A \u0646\u0627\u0645\u0639\u062A\u0628\u0631 \u0627\u0633\u062A.");
+    }
+    const db = context.env.DB;
+    const action = typeof body.action === "string" ? body.action : "";
+    const planId = typeof body.planId === "string" ? body.planId.trim() : "";
+    const now = (/* @__PURE__ */ new Date()).toISOString();
+    if (action === "toggle") {
+      if (!planId) return failure(400, "INVALID_PLAN", "\u0634\u0646\u0627\u0633\u0647 \u067E\u0644\u0646 \u0627\u0631\u0633\u0627\u0644 \u0646\u0634\u062F\u0647 \u0627\u0633\u062A.");
+      const existing2 = await readPlan(db, planId);
+      if (!existing2) return failure(404, "PLAN_NOT_FOUND", "\u067E\u0644\u0646 \u0645\u0648\u0631\u062F\u0646\u0638\u0631 \u067E\u06CC\u062F\u0627 \u0646\u0634\u062F.");
+      const nextEnabled = Number(existing2.is_enabled) === 1 ? 0 : 1;
+      await db.prepare("UPDATE static_ip_plans SET is_enabled = ?, updated_at = ? WHERE id = ?").bind(nextEnabled, now, planId).run();
+      const updated = await readPlan(db, planId);
+      return jsonResponse({
+        success: true,
+        message: nextEnabled === 1 ? "\u067E\u0644\u0646 \u0641\u0639\u0627\u0644 \u0634\u062F \u0648 \u062F\u0631 \u0645\u06CC\u0646\u06CC\u200C\u0627\u067E \u0642\u0627\u0628\u0644 \u0641\u0631\u0648\u0634 \u0627\u0633\u062A." : "\u067E\u0644\u0646 \u063A\u06CC\u0631\u0641\u0639\u0627\u0644 \u0634\u062F \u0648 \u0627\u0632 \u0645\u06CC\u0646\u06CC\u200C\u0627\u067E \u0645\u062E\u0641\u06CC \u0634\u062F.",
+        data: updated ? toAdminPlan(updated) : null
+      });
+    }
+    if (action === "delete") {
+      if (!planId) return failure(400, "INVALID_PLAN", "\u0634\u0646\u0627\u0633\u0647 \u067E\u0644\u0646 \u0627\u0631\u0633\u0627\u0644 \u0646\u0634\u062F\u0647 \u0627\u0633\u062A.");
+      const existing2 = await readPlan(db, planId);
+      if (!existing2) return failure(404, "PLAN_NOT_FOUND", "\u067E\u0644\u0646 \u0645\u0648\u0631\u062F\u0646\u0638\u0631 \u067E\u06CC\u062F\u0627 \u0646\u0634\u062F.");
+      const result = await db.prepare("DELETE FROM static_ip_plans WHERE id = ?").bind(planId).run();
+      if ((result.meta?.changes ?? 0) !== 1) {
+        return failure(409, "PLAN_STATE_CHANGED", "\u0627\u06CC\u0646 \u067E\u0644\u0646 \u062F\u06CC\u06AF\u0631 \u0648\u062C\u0648\u062F \u0646\u062F\u0627\u0631\u062F\u061B \u0641\u0647\u0631\u0633\u062A \u0631\u0627 \u0628\u0647\u200C\u0631\u0648\u0632 \u06A9\u0646\u06CC\u062F.");
+      }
+      return jsonResponse({
+        success: true,
+        message: "\u067E\u0644\u0646 \u062D\u0630\u0641 \u0634\u062F. \u0633\u0641\u0627\u0631\u0634\u200C\u0647\u0627\u06CC \u0642\u0628\u0644\u06CC \u0628\u0627 \u0639\u0646\u0648\u0627\u0646 \u062B\u0628\u062A\u200C\u0634\u062F\u0647 \u0628\u0627\u0642\u06CC \u0645\u06CC\u200C\u0645\u0627\u0646\u0646\u062F.",
+        data: { id: planId }
+      });
+    }
+    if (action !== "save") {
+      return failure(400, "INVALID_ACTION", "\u0639\u0645\u0644\u06CC\u0627\u062A \u062F\u0631\u062E\u0648\u0627\u0633\u062A\u06CC \u067E\u0634\u062A\u06CC\u0628\u0627\u0646\u06CC \u0646\u0645\u06CC\u200C\u0634\u0648\u062F.");
+    }
+    const existing = planId ? await readPlan(db, planId) : null;
+    if (planId && !existing) return failure(404, "PLAN_NOT_FOUND", "\u067E\u0644\u0646 \u0645\u0648\u0631\u062F\u0646\u0638\u0631 \u067E\u06CC\u062F\u0627 \u0646\u0634\u062F.");
+    const nodeId = typeof body.nodeId === "string" ? body.nodeId.trim() : "";
+    const name = typeof body.name === "string" ? body.name.trim() : "";
+    const dataCapGb = intInRange2(body.dataCapGb, 1, 1e5);
+    const durationDays = intInRange2(body.durationDays, 1, 3650);
+    const price = intInRange2(body.price, 0, MAX_PRICE2);
+    const sortOrder = body.sortOrder === void 0 ? existing?.sort_order ?? 100 : intInRange2(body.sortOrder, 0, 1e5);
+    const enabled = body.enabled === void 0 ? true : body.enabled === true;
+    if (!nodeId) return failure(400, "INVALID_NODE", "\u0646\u0648\u062F \u0645\u062A\u0635\u0644 \u0628\u0647 \u067E\u0644\u0646 \u0631\u0627 \u0627\u0646\u062A\u062E\u0627\u0628 \u06A9\u0646\u06CC\u062F.");
+    if (name.length < 2 || name.length > 80) {
+      return failure(400, "INVALID_NAME", "\u0646\u0627\u0645 \u067E\u0644\u0646 \u0628\u0627\u06CC\u062F \u0628\u06CC\u0646 \u06F2 \u062A\u0627 \u06F8\u06F0 \u0646\u0648\u06CC\u0633\u0647 \u0628\u0627\u0634\u062F.");
+    }
+    if (dataCapGb === null) {
+      return failure(400, "INVALID_QUOTA", "\u062D\u062C\u0645 \u067E\u0644\u0646 \u0628\u0627\u06CC\u062F \u0628\u06CC\u0646 \u06F1 \u062A\u0627 \u06F1\u06F0\u06F0\u06F0\u06F0\u06F0 \u06AF\u06CC\u06AF\u0627\u0628\u0627\u06CC\u062A \u0628\u0627\u0634\u062F.");
+    }
+    if (durationDays === null) {
+      return failure(400, "INVALID_DURATION", "\u0645\u062F\u062A \u067E\u0644\u0646 \u0628\u0627\u06CC\u062F \u0628\u06CC\u0646 \u06F1 \u062A\u0627 \u06F3\u06F6\u06F5\u06F0 \u0631\u0648\u0632 \u0628\u0627\u0634\u062F.");
+    }
+    if (price === null) {
+      return failure(400, "INVALID_PRICE", "\u0642\u06CC\u0645\u062A \u067E\u0644\u0646 \u0645\u0639\u062A\u0628\u0631 \u0646\u06CC\u0633\u062A.");
+    }
+    if (sortOrder === null) {
+      return failure(400, "INVALID_SORT", "\u062A\u0631\u062A\u06CC\u0628 \u0646\u0645\u0627\u06CC\u0634 \u0645\u0639\u062A\u0628\u0631 \u0646\u06CC\u0633\u062A.");
+    }
+    const node = await db.prepare("SELECT id FROM static_ip_nodes WHERE id = ?").bind(nodeId).first();
+    if (!node) return failure(404, "NODE_NOT_FOUND", "\u0646\u0648\u062F \u0627\u0646\u062A\u062E\u0627\u0628\u200C\u0634\u062F\u0647 \u067E\u06CC\u062F\u0627 \u0646\u0634\u062F.");
+    const id = planId || `plan_${crypto.randomUUID()}`;
+    if (existing) {
+      await db.prepare(
+        `UPDATE static_ip_plans
+           SET node_id = ?, name = ?, data_cap_gb = ?, duration_days = ?, price = ?,
+               is_enabled = ?, sort_order = ?, updated_at = ?
+           WHERE id = ?`
+      ).bind(
+        nodeId,
+        name,
+        dataCapGb,
+        durationDays,
+        price,
+        enabled ? 1 : 0,
+        sortOrder,
+        now,
+        id
+      ).run();
+    } else {
+      await db.prepare(
+        `INSERT INTO static_ip_plans
+             (id, node_id, name, data_cap_gb, duration_days, price, currency,
+              is_enabled, sort_order, created_at, updated_at)
+           VALUES (?, ?, ?, ?, ?, ?, 'IRT', ?, ?, ?, ?)`
+      ).bind(id, nodeId, name, dataCapGb, durationDays, price, enabled ? 1 : 0, sortOrder, now, now).run();
+    }
+    const saved = await readPlan(db, id);
+    return jsonResponse({
+      success: true,
+      message: existing ? "\u062A\u063A\u06CC\u06CC\u0631\u0627\u062A \u067E\u0644\u0646 \u0630\u062E\u06CC\u0631\u0647 \u0634\u062F." : "\u067E\u0644\u0646 \u062C\u062F\u06CC\u062F \u0633\u0627\u062E\u062A\u0647 \u0634\u062F.",
+      data: saved ? toAdminPlan(saved) : null
+    });
+  } catch (cause) {
+    return internalFailure(cause, "STATIC_IP_PLAN_WRITE_FAILED");
+  }
+}
+__name(onRequestPost2, "onRequestPost");
+
 // api/admin/auth/_otp.ts
 var OTP_TTL_SECONDS = 5 * 60;
 var OTP_COOLDOWN_SECONDS = 45;
@@ -362,6 +799,19 @@ function clientIp(request) {
   return request.headers.get("CF-Connecting-IP")?.trim() || request.headers.get("X-Forwarded-For")?.split(",")[0]?.trim() || "unknown";
 }
 __name(clientIp, "clientIp");
+var TelegramSendError = class extends Error {
+  static {
+    __name(this, "TelegramSendError");
+  }
+  description;
+  errorCode;
+  constructor(description, errorCode = null) {
+    super(description);
+    this.name = "TelegramSendError";
+    this.description = description;
+    this.errorCode = errorCode;
+  }
+};
 async function sendTelegramMessage(botToken, chatId, text) {
   const response = await fetch(`https://api.telegram.org/bot${botToken}/sendMessage`, {
     method: "POST",
@@ -378,9 +828,17 @@ async function sendTelegramMessage(botToken, chatId, text) {
   } catch {
     payload = null;
   }
-  if (!response.ok || payload?.ok !== true) {
-    const detail = payload?.description || `HTTP ${response.status}`;
-    throw new Error(detail);
+  if (!response.ok) {
+    throw new TelegramSendError(
+      payload?.description?.trim() || `Telegram HTTP ${response.status}`,
+      payload?.error_code ?? response.status
+    );
+  }
+  if (payload?.ok !== true) {
+    throw new TelegramSendError(
+      payload?.description?.trim() || "\u067E\u0627\u0633\u062E \u062A\u0644\u06AF\u0631\u0627\u0645 \u062A\u0623\u06CC\u06CC\u062F \u0627\u0631\u0633\u0627\u0644 \u067E\u06CC\u0627\u0645 \u0631\u0627 \u0646\u062F\u0627\u0634\u062A.",
+      payload?.error_code ?? null
+    );
   }
 }
 __name(sendTelegramMessage, "sendTelegramMessage");
@@ -404,21 +862,29 @@ async function cleanupOtps(db, now) {
 __name(cleanupOtps, "cleanupOtps");
 
 // api/admin/auth/request-otp.ts
-async function onRequestPost(context) {
-  const { env } = context;
+async function issueOtp(context) {
+  const env = context.env ?? {};
   const botToken = env.TELEGRAM_BOT_TOKEN?.trim();
   if (!botToken) {
-    return failure(500, "SERVER_NOT_CONFIGURED", "\u062A\u0648\u06A9\u0646 \u0631\u0628\u0627\u062A \u062A\u0644\u06AF\u0631\u0627\u0645 \u062F\u0631 \u062A\u0646\u0638\u06CC\u0645\u0627\u062A \u0633\u0631\u0648\u0631 \u0645\u0648\u062C\u0648\u062F \u0646\u06CC\u0633\u062A.");
+    return failure(
+      500,
+      "TELEGRAM_CONFIG_MISSING",
+      "\u062A\u0646\u0638\u06CC\u0645\u0627\u062A \u062A\u0644\u06AF\u0631\u0627\u0645 \u0631\u0648\u06CC \u0633\u0631\u0648\u0631 \u06CC\u0627\u0641\u062A \u0646\u0634\u062F: TELEGRAM_BOT_TOKEN \u062A\u0639\u0631\u06CC\u0641 \u0646\u0634\u062F\u0647 \u0627\u0633\u062A."
+    );
   }
   if (!env.DB) {
-    return failure(503, "DB_NOT_CONFIGURED", "\u0627\u062A\u0635\u0627\u0644 \u067E\u0627\u06CC\u06AF\u0627\u0647\u200C\u062F\u0627\u062F\u0647 D1 \u062F\u0631 \u0633\u0631\u0648\u0631 \u062A\u0646\u0638\u06CC\u0645 \u0646\u0634\u062F\u0647 \u0627\u0633\u062A.");
+    return failure(
+      503,
+      "DB_NOT_CONFIGURED",
+      "\u0627\u062A\u0635\u0627\u0644 \u067E\u0627\u06CC\u06AF\u0627\u0647\u200C\u062F\u0627\u062F\u0647 D1 \u062F\u0631 \u0633\u0631\u0648\u0631 \u062A\u0646\u0638\u06CC\u0645 \u0646\u0634\u062F\u0647 \u0627\u0633\u062A (binding \u0628\u0627 \u0646\u0627\u0645 DB)."
+    );
   }
   const adminIds = [...configuredAdminIds(env)];
   if (adminIds.length === 0) {
     return failure(
       503,
       "ADMIN_LIST_NOT_CONFIGURED",
-      "\u0647\u06CC\u0686 \u0634\u0646\u0627\u0633\u0647 \u0645\u062F\u06CC\u0631\u06CC\u062A\u06CC \u062F\u0631 ADMIN_TELEGRAM_IDS \u062A\u0646\u0638\u06CC\u0645 \u0646\u0634\u062F\u0647 \u0627\u0633\u062A."
+      "\u062A\u0646\u0638\u06CC\u0645\u0627\u062A \u062A\u0644\u06AF\u0631\u0627\u0645 \u0631\u0648\u06CC \u0633\u0631\u0648\u0631 \u06CC\u0627\u0641\u062A \u0646\u0634\u062F: ADMIN_TELEGRAM_IDS \u062E\u0627\u0644\u06CC \u06CC\u0627 \u0646\u0627\u0645\u0639\u062A\u0628\u0631 \u0627\u0633\u062A."
     );
   }
   const db = env.DB;
@@ -446,8 +912,11 @@ async function onRequestPost(context) {
     );
   }
   let sent = 0;
-  let failed = 0;
-  let lastError = "";
+  let sendFailed = 0;
+  let dbFailed = 0;
+  let lastDbError = "";
+  let lastSendError = "";
+  let lastTelegramCode = null;
   for (const telegramId of recipients) {
     const code = generateOtp();
     const codeHash = await hashOtp(code, botToken);
@@ -458,17 +927,22 @@ async function onRequestPost(context) {
              (id, telegram_id, code, expires_at, attempts, consumed_at, created_at)
            VALUES (?, ?, ?, ?, 0, NULL, ?)`
       ).bind(rowId, telegramId, codeHash, expiresAt, nowIso).run();
-    } catch {
-      failed += 1;
-      lastError = "\u062B\u0628\u062A \u06A9\u062F \u062F\u0631 \u067E\u0627\u06CC\u06AF\u0627\u0647\u200C\u062F\u0627\u062F\u0647 \u0627\u0646\u062C\u0627\u0645 \u0646\u0634\u062F.";
+    } catch (cause) {
+      dbFailed += 1;
+      lastDbError = cause instanceof Error ? cause.message : String(cause);
       continue;
     }
     try {
       await sendTelegramMessage(botToken, telegramId, otpMessage(code));
       sent += 1;
     } catch (cause) {
-      failed += 1;
-      lastError = cause instanceof Error ? cause.message : "\u0627\u0631\u0633\u0627\u0644 \u067E\u06CC\u0627\u0645 \u062A\u0644\u06AF\u0631\u0627\u0645 \u0646\u0627\u0645\u0648\u0641\u0642 \u0628\u0648\u062F.";
+      sendFailed += 1;
+      if (cause instanceof TelegramSendError) {
+        lastSendError = cause.description;
+        lastTelegramCode = cause.errorCode;
+      } else {
+        lastSendError = cause instanceof Error ? cause.message : String(cause);
+      }
       try {
         await db.prepare("DELETE FROM admin_otps WHERE id = ?").bind(rowId).run();
       } catch {
@@ -476,28 +950,50 @@ async function onRequestPost(context) {
     }
   }
   if (sent === 0) {
+    if (sendFailed > 0) {
+      return failure(
+        502,
+        "TELEGRAM_SEND_FAILED",
+        `\u0627\u0631\u0633\u0627\u0644 \u06A9\u062F \u062A\u0627\u06CC\u06CC\u062F \u0628\u0647 \u062A\u0644\u06AF\u0631\u0627\u0645 \u0627\u0646\u062C\u0627\u0645 \u0646\u0634\u062F: ${lastSendError || "\u062E\u0637\u0627\u06CC \u0646\u0627\u0645\u0634\u062E\u0635"}`,
+        {
+          telegramError: lastSendError || null,
+          telegramErrorCode: lastTelegramCode
+        }
+      );
+    }
     return failure(
-      502,
-      "TELEGRAM_SEND_FAILED",
-      `\u0627\u0631\u0633\u0627\u0644 \u06A9\u062F \u062A\u0627\u06CC\u06CC\u062F \u0628\u0647 \u062A\u0644\u06AF\u0631\u0627\u0645 \u0645\u062F\u06CC\u0631 \u0627\u0646\u062C\u0627\u0645 \u0646\u0634\u062F: ${lastError || "\u062E\u0637\u0627\u06CC \u0646\u0627\u0645\u0634\u062E\u0635"}`
+      503,
+      "DB_UNAVAILABLE",
+      `\u062B\u0628\u062A \u06A9\u062F \u062A\u0627\u06CC\u06CC\u062F \u062F\u0631 \u067E\u0627\u06CC\u06AF\u0627\u0647\u200C\u062F\u0627\u062F\u0647 \u0627\u0646\u062C\u0627\u0645 \u0646\u0634\u062F: ${lastDbError || "\u062E\u0637\u0627\u06CC \u0646\u0627\u0645\u0634\u062E\u0635"}`,
+      { dbError: lastDbError || null }
     );
   }
   return jsonResponse({
     success: true,
-    message: failed > 0 ? "\u06A9\u062F \u062A\u0627\u06CC\u06CC\u062F \u0628\u0647 \u062A\u0644\u06AF\u0631\u0627\u0645 \u0627\u0631\u0633\u0627\u0644 \u0634\u062F\u060C \u0627\u0645\u0627 \u0627\u0631\u0633\u0627\u0644 \u0628\u0647 \u0628\u0631\u062E\u06CC \u0645\u062F\u06CC\u0631\u0627\u0646 \u0646\u0627\u0645\u0648\u0641\u0642 \u0628\u0648\u062F." : "\u06A9\u062F \u062A\u0627\u06CC\u06CC\u062F \u0628\u0647 \u062A\u0644\u06AF\u0631\u0627\u0645 \u0645\u062F\u06CC\u0631 \u0627\u0631\u0633\u0627\u0644 \u0634\u062F.",
+    message: sendFailed + dbFailed > 0 ? "\u06A9\u062F \u062A\u0627\u06CC\u06CC\u062F \u0628\u0647 \u062A\u0644\u06AF\u0631\u0627\u0645 \u0627\u0631\u0633\u0627\u0644 \u0634\u062F\u060C \u0627\u0645\u0627 \u0627\u0631\u0633\u0627\u0644 \u0628\u0647 \u0628\u0631\u062E\u06CC \u0645\u062F\u06CC\u0631\u0627\u0646 \u0646\u0627\u0645\u0648\u0641\u0642 \u0628\u0648\u062F." : "\u06A9\u062F \u062A\u0627\u06CC\u06CC\u062F \u0628\u0647 \u062A\u0644\u06AF\u0631\u0627\u0645 \u0645\u062F\u06CC\u0631 \u0627\u0631\u0633\u0627\u0644 \u0634\u062F.",
     data: {
       sent,
-      failed,
+      failed: sendFailed + dbFailed,
       expiresAt,
       expiresInSeconds: OTP_TTL_SECONDS,
-      cooldownSeconds: OTP_COOLDOWN_SECONDS
+      cooldownSeconds: OTP_COOLDOWN_SECONDS,
+      ...dbFailed > 0 ? { dbError: lastDbError || null } : {},
+      ...sendFailed > 0 ? { telegramError: lastSendError || null } : {}
     }
   });
 }
-__name(onRequestPost, "onRequestPost");
+__name(issueOtp, "issueOtp");
+async function onRequestPost3(context) {
+  try {
+    return await issueOtp(context);
+  } catch (cause) {
+    return internalFailure(cause, "REQUEST_OTP_FAILED");
+  }
+}
+__name(onRequestPost3, "onRequestPost");
 
 // api/admin/auth/session.ts
-async function onRequestGet(context) {
+async function onRequestGet3(context) {
   const auth = await authenticateAdmin(context.request, context.env);
   if (!auth.ok) return failure(auth.status, auth.code, auth.message);
   return jsonResponse({
@@ -513,7 +1009,7 @@ async function onRequestGet(context) {
     }
   });
 }
-__name(onRequestGet, "onRequestGet");
+__name(onRequestGet3, "onRequestGet");
 
 // api/admin/auth/verify-otp.ts
 async function recordFailure(context, ip, now) {
@@ -550,14 +1046,22 @@ async function isThrottled(context, ip, now) {
   }
 }
 __name(isThrottled, "isThrottled");
-async function onRequestPost2(context) {
-  const { env } = context;
+async function handleVerifyOtp(context) {
+  const env = context.env ?? {};
   const botToken = env.TELEGRAM_BOT_TOKEN?.trim();
   if (!botToken) {
-    return failure(500, "SERVER_NOT_CONFIGURED", "\u062A\u0648\u06A9\u0646 \u0631\u0628\u0627\u062A \u062A\u0644\u06AF\u0631\u0627\u0645 \u062F\u0631 \u062A\u0646\u0638\u06CC\u0645\u0627\u062A \u0633\u0631\u0648\u0631 \u0645\u0648\u062C\u0648\u062F \u0646\u06CC\u0633\u062A.");
+    return failure(
+      500,
+      "TELEGRAM_CONFIG_MISSING",
+      "\u062A\u0646\u0638\u06CC\u0645\u0627\u062A \u062A\u0644\u06AF\u0631\u0627\u0645 \u0631\u0648\u06CC \u0633\u0631\u0648\u0631 \u06CC\u0627\u0641\u062A \u0646\u0634\u062F: TELEGRAM_BOT_TOKEN \u062A\u0639\u0631\u06CC\u0641 \u0646\u0634\u062F\u0647 \u0627\u0633\u062A."
+    );
   }
   if (!env.DB) {
-    return failure(503, "DB_NOT_CONFIGURED", "\u0627\u062A\u0635\u0627\u0644 \u067E\u0627\u06CC\u06AF\u0627\u0647\u200C\u062F\u0627\u062F\u0647 D1 \u062F\u0631 \u0633\u0631\u0648\u0631 \u062A\u0646\u0638\u06CC\u0645 \u0646\u0634\u062F\u0647 \u0627\u0633\u062A.");
+    return failure(
+      503,
+      "DB_NOT_CONFIGURED",
+      "\u0627\u062A\u0635\u0627\u0644 \u067E\u0627\u06CC\u06AF\u0627\u0647\u200C\u062F\u0627\u062F\u0647 D1 \u062F\u0631 \u0633\u0631\u0648\u0631 \u062A\u0646\u0638\u06CC\u0645 \u0646\u0634\u062F\u0647 \u0627\u0633\u062A (binding \u0628\u0627 \u0646\u0627\u0645 DB)."
+    );
   }
   let body = {};
   try {
@@ -644,7 +1148,645 @@ async function onRequestPost2(context) {
     }
   });
 }
-__name(onRequestPost2, "onRequestPost");
+__name(handleVerifyOtp, "handleVerifyOtp");
+async function onRequestPost4(context) {
+  try {
+    return await handleVerifyOtp(context);
+  } catch (cause) {
+    return internalFailure(cause, "VERIFY_OTP_FAILED");
+  }
+}
+__name(onRequestPost4, "onRequestPost");
+
+// api/_lib/staticIpDelivery.ts
+async function findOwnedConfig(db, orderId, userId) {
+  const row = await db.prepare(
+    `SELECT delivery_note FROM orders
+     WHERE id = ? AND user_id = ? AND kind = 'vpn' AND status = 'completed'`
+  ).bind(orderId, userId).first();
+  return row?.delivery_note?.trim() ? row.delivery_note : null;
+}
+__name(findOwnedConfig, "findOwnedConfig");
+async function sendVpnDocument(botToken, telegramId, content) {
+  botToken = botToken?.trim();
+  if (!botToken) {
+    return { sent: false, code: "TELEGRAM_NOT_CONFIGURED", message: "\u062A\u0648\u06A9\u0646 \u0631\u0628\u0627\u062A \u062A\u0644\u06AF\u0631\u0627\u0645 \u062A\u0646\u0638\u06CC\u0645 \u0646\u0634\u062F\u0647 \u0627\u0633\u062A. (TELEGRAM_NOT_CONFIGURED)" };
+  }
+  if (!Number.isSafeInteger(telegramId) || telegramId <= 0) {
+    return { sent: false, code: "TELEGRAM_USER_NOT_FOUND", message: "\u0634\u0646\u0627\u0633\u0647 \u062A\u0644\u06AF\u0631\u0627\u0645 \u0645\u0634\u062A\u0631\u06CC \u067E\u06CC\u062F\u0627 \u0646\u0634\u062F. (TELEGRAM_USER_NOT_FOUND)" };
+  }
+  const form = new FormData();
+  form.set("chat_id", String(telegramId));
+  form.set("document", new Blob([content], { type: "application/x-openvpn-profile" }), "varnet-config.ovpn");
+  try {
+    const response = await fetch(`https://api.telegram.org/bot${botToken}/sendDocument`, {
+      method: "POST",
+      body: form,
+      signal: AbortSignal.timeout(1e4)
+    });
+    const result = await response.json().catch(() => null);
+    if (response.ok && result?.ok === true) return { sent: true };
+    const code = `TELEGRAM_${result?.error_code || response.status}`;
+    const detail = typeof result?.description === "string" ? result.description.replaceAll(botToken, "[redacted]").slice(0, 300) : "\u067E\u0627\u0633\u062E \u0646\u0627\u0645\u0639\u062A\u0628\u0631 \u0627\u0632 \u062A\u0644\u06AF\u0631\u0627\u0645";
+    return { sent: false, code, message: `${detail} (${code})` };
+  } catch {
+    return { sent: false, code: "TELEGRAM_UNAVAILABLE", message: "\u0627\u0631\u062A\u0628\u0627\u0637 \u0628\u0627 \u062A\u0644\u06AF\u0631\u0627\u0645 \u0628\u0631\u0642\u0631\u0627\u0631 \u0646\u0634\u062F. (TELEGRAM_UNAVAILABLE)" };
+  }
+}
+__name(sendVpnDocument, "sendVpnDocument");
+
+// api/admin/orders/action.ts
+var MAX_BODY_BYTES = 8192;
+var MAX_NOTE_LENGTH = 4e3;
+var MAX_REASON_LENGTH = 1e3;
+var MIN_REASON_LENGTH = 3;
+var OPENVPN_PORT = 1194;
+async function readBody(context) {
+  let raw;
+  try {
+    raw = await context.request.text();
+  } catch {
+    return null;
+  }
+  if (raw.length > MAX_BODY_BYTES) return null;
+  try {
+    const parsed = JSON.parse(raw);
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return null;
+    return parsed;
+  } catch {
+    return null;
+  }
+}
+__name(readBody, "readBody");
+function safeHost(value) {
+  return value.replace(/[^a-zA-Z0-9.:-]/g, "");
+}
+__name(safeHost, "safeHost");
+function configUsername(order) {
+  const base = order.id.replace(/[^a-zA-Z0-9]/g, "");
+  return (base ? `vpn_${base}` : "vpn_user").slice(0, 48);
+}
+__name(configUsername, "configUsername");
+function buildOpenVpnProfile(order, node) {
+  const host = safeHost(node.ip);
+  if (!host) return null;
+  const username = configUsername(order);
+  const password = crypto.randomUUID().replace(/-/g, "");
+  const protocol = /tcp/i.test(node.protocol) ? "tcp" : "udp";
+  const lines = [
+    "# VarNet static-IP profile",
+    `# Node: ${node.name.replace(/[\r\n]+/g, " ").trim() || "static-ip"}`,
+    `# Account: ${username}`,
+    "client",
+    "dev tun",
+    `proto ${protocol}`,
+    `remote ${host} ${OPENVPN_PORT}`,
+    "resolv-retry infinite",
+    "nobind",
+    "persist-key",
+    "persist-tun",
+    "remote-cert-tls server",
+    "auth-nocache",
+    "verb 3",
+    "<auth-user-pass>",
+    username,
+    password,
+    "</auth-user-pass>"
+  ];
+  return `${lines.join("\n")}
+`;
+}
+__name(buildOpenVpnProfile, "buildOpenVpnProfile");
+async function loadNodeInfo(db, productId) {
+  try {
+    const planNode = await db.prepare(
+      `SELECT n.ip AS ip, n.protocol AS protocol, n.name AS name
+         FROM static_ip_plans p
+         JOIN static_ip_nodes n ON n.id = p.node_id
+         WHERE p.id = ?`
+    ).bind(productId).first();
+    if (planNode) return planNode;
+  } catch {
+  }
+  try {
+    const node = await db.prepare("SELECT ip, protocol, name FROM static_ip_nodes WHERE id = ?").bind(productId).first();
+    return node ?? null;
+  } catch {
+    return null;
+  }
+}
+__name(loadNodeInfo, "loadNodeInfo");
+async function resolveDeliveryNote(db, order, adminNote) {
+  if (adminNote) return adminNote;
+  if (order.kind === "vpn") {
+    const node = await loadNodeInfo(db, order.product_id);
+    if (node) {
+      const profile = buildOpenVpnProfile(order, node);
+      if (profile) return profile;
+    }
+  }
+  return order.product_title;
+}
+__name(resolveDeliveryNote, "resolveDeliveryNote");
+async function completeOrder(context, order, adminNote) {
+  const db = context.env.DB;
+  const now = (/* @__PURE__ */ new Date()).toISOString();
+  if (order.status !== "pending" && order.status !== "paid" && order.status !== "provisioning") {
+    return failure(409, "ORDER_NOT_PAYABLE", "\u0641\u0642\u0637 \u0633\u0641\u0627\u0631\u0634 \u062F\u0631 \u0627\u0646\u062A\u0638\u0627\u0631 \u06CC\u0627 \u067E\u0631\u062F\u0627\u062E\u062A\u200C\u0634\u062F\u0647 \u0642\u0627\u0628\u0644 \u062A\u0627\u06CC\u06CC\u062F \u0648 \u062A\u062D\u0648\u06CC\u0644 \u0627\u0633\u062A.");
+  }
+  const deliveryNote = await resolveDeliveryNote(db, order, adminNote);
+  if (deliveryNote.length > MAX_NOTE_LENGTH) {
+    return failure(400, "INVALID_NOTE", "\u0627\u0637\u0644\u0627\u0639\u0627\u062A \u062A\u062D\u0648\u06CC\u0644 \u0628\u06CC\u0634 \u0627\u0632 \u062D\u062F \u0637\u0648\u0644\u0627\u0646\u06CC \u0627\u0633\u062A.");
+  }
+  const batch = [
+    db.prepare(
+      `UPDATE orders
+         SET status = 'completed', delivery_note = ?
+         WHERE id = ? AND status IN ('pending', 'paid', 'provisioning')`
+    ).bind(deliveryNote, order.id),
+    // Delivering a pending card-to-card order is the admin's approval of its receipt.
+    db.prepare(
+      `UPDATE payment_receipts
+         SET status = 'APPROVED', reviewed_at = ?
+         WHERE order_id = ? AND purpose = 'product_purchase' AND status = 'PENDING'`
+    ).bind(now, order.id)
+  ];
+  const results = await db.batch(batch);
+  if ((results[0]?.meta?.changes ?? 0) !== 1) {
+    return failure(409, "ORDER_STATE_CHANGED", "\u0648\u0636\u0639\u06CC\u062A \u0633\u0641\u0627\u0631\u0634 \u062A\u063A\u06CC\u06CC\u0631 \u06A9\u0631\u062F\u0647 \u0627\u0633\u062A\u061B \u0641\u0647\u0631\u0633\u062A \u0631\u0627 \u0628\u0647\u200C\u0631\u0648\u0632 \u06A9\u0646\u06CC\u062F.");
+  }
+  let telegramDelivery;
+  if (order.kind === "vpn") {
+    try {
+      const user = await db.prepare("SELECT telegram_id FROM users WHERE id = ?").bind(order.user_id).first();
+      telegramDelivery = await sendVpnDocument(context.env.TELEGRAM_BOT_TOKEN, Number(user?.telegram_id), deliveryNote);
+    } catch {
+      telegramDelivery = { sent: false, code: "TELEGRAM_USER_LOOKUP_FAILED", message: "\u062E\u0648\u0627\u0646\u062F\u0646 \u0634\u0646\u0627\u0633\u0647 \u062A\u0644\u06AF\u0631\u0627\u0645 \u0645\u0634\u062A\u0631\u06CC \u0627\u0646\u062C\u0627\u0645 \u0646\u0634\u062F. (TELEGRAM_USER_LOOKUP_FAILED)" };
+    }
+  }
+  return jsonResponse({
+    success: true,
+    message: "\u0633\u0641\u0627\u0631\u0634 \u062A\u06A9\u0645\u06CC\u0644 \u0634\u062F \u0648 \u0627\u0637\u0644\u0627\u0639\u0627\u062A \u062A\u062D\u0648\u06CC\u0644 \u0628\u0631\u0627\u06CC \u06A9\u0627\u0631\u0628\u0631 \u062B\u0628\u062A \u06AF\u0631\u062F\u06CC\u062F.",
+    data: {
+      orderId: order.id,
+      status: "completed",
+      deliveryNote,
+      updatedAt: now,
+      telegramDelivery
+    }
+  });
+}
+__name(completeOrder, "completeOrder");
+async function rejectOrder(context, order, reason) {
+  const db = context.env.DB;
+  const now = (/* @__PURE__ */ new Date()).toISOString();
+  const refundTotal = order.status === "paid" || order.status === "provisioning" ? Number(order.total) : 0;
+  const refundTxId = `txn_${crypto.randomUUID()}`;
+  const rejectionNote = `\u062F\u0644\u06CC\u0644 \u0631\u062F \u0633\u0641\u0627\u0631\u0634: ${reason}`;
+  const batch = [
+    db.prepare(
+      `UPDATE orders
+         SET status = 'refunded', delivery_note = ?
+         WHERE id = ? AND status IN ('pending', 'paid', 'provisioning')`
+    ).bind(rejectionNote, order.id)
+  ];
+  if (refundTotal > 0) {
+    batch.push(
+      db.prepare(
+        `UPDATE users SET balance = balance + ?, updated_at = ?
+           WHERE id = ?
+             AND NOT EXISTS (
+               SELECT 1 FROM wallet_transactions WHERE type = 'refund' AND reference = ?
+             )`
+      ).bind(refundTotal, now, order.user_id, order.id),
+      db.prepare(
+        `INSERT INTO wallet_transactions
+             (id, user_id, type, amount, balance_after, currency, description, reference, created_at)
+           SELECT ?, ?, 'refund', ?, balance, 'IRT', ?, ?, ?
+           FROM users
+           WHERE id = ?
+             AND NOT EXISTS (
+               SELECT 1 FROM wallet_transactions WHERE type = 'refund' AND reference = ?
+             )`
+      ).bind(
+        refundTxId,
+        order.user_id,
+        refundTotal,
+        `\u0628\u0627\u0632\u06AF\u0634\u062A \u0648\u062C\u0647 \u0633\u0641\u0627\u0631\u0634 ${order.product_title}`,
+        order.id,
+        now,
+        order.user_id,
+        order.id
+      )
+    );
+  }
+  const results = await db.batch(batch);
+  if ((results[0]?.meta?.changes ?? 0) !== 1) {
+    return failure(409, "ORDER_STATE_CHANGED", "\u0627\u06CC\u0646 \u0633\u0641\u0627\u0631\u0634 \u062F\u06CC\u06AF\u0631 \u0642\u0627\u0628\u0644 \u0631\u062F \u0646\u06CC\u0633\u062A\u061B \u0641\u0647\u0631\u0633\u062A \u0631\u0627 \u0628\u0647\u200C\u0631\u0648\u0632 \u06A9\u0646\u06CC\u062F.");
+  }
+  let balance = null;
+  try {
+    const row = await db.prepare("SELECT balance FROM users WHERE id = ?").bind(order.user_id).first();
+    balance = row ? Number(row.balance) : null;
+  } catch {
+    balance = null;
+  }
+  const refunded = refundTotal > 0 && (results[1]?.meta?.changes ?? 0) === 1 ? refundTotal : 0;
+  const result = { refunded, balance };
+  return jsonResponse({
+    success: true,
+    message: refunded > 0 ? `\u0633\u0641\u0627\u0631\u0634 \u0631\u062F \u0634\u062F \u0648 ${refunded.toLocaleString("en-US")} \u062A\u0648\u0645\u0627\u0646 \u0628\u0647 \u06A9\u06CC\u0641 \u067E\u0648\u0644 \u06A9\u0627\u0631\u0628\u0631 \u0628\u0631\u06AF\u0634\u062A.` : "\u0633\u0641\u0627\u0631\u0634 \u0631\u062F \u0634\u062F. \u0627\u06CC\u0646 \u0633\u0641\u0627\u0631\u0634 \u067E\u0631\u062F\u0627\u062E\u062A\u06CC \u0646\u062F\u0627\u0634\u062A \u0648 \u0645\u0628\u0644\u063A\u06CC \u0628\u0647 \u06A9\u06CC\u0641 \u067E\u0648\u0644 \u0628\u0631\u0646\u06AF\u0634\u062A.",
+    data: { orderId: order.id, status: "refunded", reason, ...result }
+  });
+}
+__name(rejectOrder, "rejectOrder");
+async function onRequestPost5(context) {
+  try {
+    const auth = await authenticateAdmin(context.request, context.env);
+    if (!auth.ok) return failure(auth.status, auth.code, auth.message);
+    const body = await readBody(context);
+    if (!body) return failure(400, "INVALID_BODY", "\u0633\u0627\u062E\u062A\u0627\u0631 \u062F\u0631\u062E\u0648\u0627\u0633\u062A \u0627\u0642\u062F\u0627\u0645 \u0633\u0641\u0627\u0631\u0634 \u0646\u0627\u0645\u0639\u062A\u0628\u0631 \u0627\u0633\u062A.");
+    const orderId = typeof body.orderId === "string" ? body.orderId.trim() : "";
+    if (!orderId || orderId.length > 128) {
+      return failure(400, "INVALID_ORDER", "\u0634\u0646\u0627\u0633\u0647 \u0633\u0641\u0627\u0631\u0634 \u0646\u0627\u0645\u0639\u062A\u0628\u0631 \u0627\u0633\u062A.");
+    }
+    const action = body.action;
+    if (action !== "complete" && action !== "reject") {
+      return failure(400, "INVALID_ACTION", "\u0627\u0642\u062F\u0627\u0645 \u0633\u0641\u0627\u0631\u0634 \u0646\u0627\u0645\u0639\u062A\u0628\u0631 \u0627\u0633\u062A.");
+    }
+    const deliveryNote = typeof body.deliveryNote === "string" ? body.deliveryNote.trim() : "";
+    if (deliveryNote.length > MAX_NOTE_LENGTH) {
+      return failure(400, "INVALID_NOTE", "\u0627\u0637\u0644\u0627\u0639\u0627\u062A \u062A\u062D\u0648\u06CC\u0644 \u0628\u06CC\u0634 \u0627\u0632 \u062D\u062F \u0637\u0648\u0644\u0627\u0646\u06CC \u0627\u0633\u062A.");
+    }
+    const rejectReason = typeof body.rejectReason === "string" ? body.rejectReason.trim() : "";
+    if (rejectReason.length > MAX_REASON_LENGTH) {
+      return failure(400, "INVALID_REASON", "\u062F\u0644\u06CC\u0644 \u0631\u062F \u0633\u0641\u0627\u0631\u0634 \u0628\u06CC\u0634 \u0627\u0632 \u062D\u062F \u0637\u0648\u0644\u0627\u0646\u06CC \u0627\u0633\u062A.");
+    }
+    if (action === "reject" && rejectReason.length < MIN_REASON_LENGTH) {
+      return failure(400, "REJECT_REASON_REQUIRED", "\u062F\u0644\u06CC\u0644 \u0631\u062F \u0633\u0641\u0627\u0631\u0634 \u0631\u0627 \u0648\u0627\u0631\u062F \u06A9\u0646\u06CC\u062F.");
+    }
+    const db = context.env.DB;
+    let order;
+    try {
+      order = await db.prepare(
+        `SELECT id, user_id, product_id, product_title, kind, total, status, payment_method
+           FROM orders WHERE id = ?`
+      ).bind(orderId).first();
+    } catch {
+      return failure(503, "DB_UNAVAILABLE", "\u062E\u0648\u0627\u0646\u062F\u0646 \u0633\u0641\u0627\u0631\u0634 \u0627\u0632 \u067E\u0627\u06CC\u06AF\u0627\u0647 \u062F\u0627\u062F\u0647 \u0627\u0646\u062C\u0627\u0645 \u0646\u0634\u062F.");
+    }
+    if (!order) return failure(404, "ORDER_NOT_FOUND", "\u0633\u0641\u0627\u0631\u0634 \u067E\u06CC\u062F\u0627 \u0646\u0634\u062F.");
+    return action === "complete" ? await completeOrder(context, order, deliveryNote) : await rejectOrder(context, order, rejectReason);
+  } catch (cause) {
+    return internalFailure(cause, "ORDER_ACTION_FAILED");
+  }
+}
+__name(onRequestPost5, "onRequestPost");
+
+// ../src/lib/productCategories.ts
+var PRODUCT_CATEGORIES = [
+  "ai",
+  "design",
+  "os",
+  "office",
+  "security",
+  "streaming",
+  "dev",
+  "social",
+  "gaming",
+  "other"
+];
+var CATEGORY_KEYWORDS = [
+  ["ai", ["claude", "chatgpt", "gpt", "gemini", "grok", "perplexity", "elevenlabs", "muse ai", "openart", "leonardo", "suno", "ripple", "cursor", "krea ai", "gamma", "midjourney", "copilot", "wispr flow", "manus", "minimax", "antigravity", "higgsfield", "pangram", "chatprd", "lovable", "magic patterns"]],
+  ["design", ["adobe", "photoshop", "illustrator", "acrobat", "canva", "figma", "framer", "corel", "coreldraw", "capcut", "alight motion", "meitu", "wink", "xingtu", "mobbin", "autodesk"]],
+  ["os", ["windows", "win 10", "win 11", "windows server"]],
+  ["office", ["office", "microsoft 365", "ms365", "notion", "zoom", "grammarly", "quizlet", "coursera", "udemy", "granola", "intercom", "dropbox", "google drive"]],
+  ["security", ["kaspersky", "nordvpn", "expressvpn", "surfshark", "purevpn", "proton", "vpn", "antivirus"]],
+  ["streaming", ["netflix", "spotify", "youtube", "amazon prime", "hbo", "crunchyroll", "apple music", "apple tv", "tv360", "brain.fm"]],
+  ["dev", ["visual studio", "jetbrains", "posthog", "railway", "resend", "warp", "n8n", "linear", "api", "sql"]],
+  ["social", ["facebook", "linkedin", "x premium", "twitter", "discord nitro"]],
+  ["gaming", ["xbox", "exitlag", "game", "steam"]]
+];
+function classifyProduct(title) {
+  const name = title.trim().toLowerCase();
+  return CATEGORY_KEYWORDS.find(([, keywords]) => keywords.some((keyword) => name.includes(keyword)))?.[0] ?? "other";
+}
+__name(classifyProduct, "classifyProduct");
+
+// api/admin/products/override.ts
+async function onRequestPost6(context) {
+  try {
+    const auth = await authenticateAdmin(context.request, context.env);
+    if (!auth.ok) {
+      return failure(auth.status, "ADMIN_AUTH_FAILED", "\u062F\u0633\u062A\u0631\u0633\u06CC \u0628\u0647 \u0639\u0645\u0644\u06CC\u0627\u062A \u0645\u062F\u06CC\u0631\u06CC\u062A\u06CC \u0627\u0645\u06A9\u0627\u0646\u200C\u067E\u0630\u06CC\u0631 \u0646\u06CC\u0633\u062A.");
+    }
+    let body;
+    try {
+      body = await context.request.json();
+    } catch {
+      return failure(400, "OVERRIDE_BAD_REQUEST", "\u0633\u0627\u062E\u062A\u0627\u0631 \u062F\u0631\u062E\u0648\u0627\u0633\u062A \u0646\u0627\u0645\u0639\u062A\u0628\u0631 \u0627\u0633\u062A.");
+    }
+    if (!body || typeof body !== "object" || Array.isArray(body)) {
+      return failure(400, "OVERRIDE_BAD_REQUEST", "\u0633\u0627\u062E\u062A\u0627\u0631 \u062F\u0631\u062E\u0648\u0627\u0633\u062A \u0646\u0627\u0645\u0639\u062A\u0628\u0631 \u0627\u0633\u062A.");
+    }
+    const { productId, faDescription, customCategory, isFeatured, isBestseller } = body;
+    if (typeof productId !== "string" || productId.trim() === "") {
+      return failure(400, "OVERRIDE_INVALID_PRODUCT_ID", "\u0634\u0646\u0627\u0633\u0647 \u0645\u062D\u0635\u0648\u0644 \u0646\u0627\u0645\u0639\u062A\u0628\u0631 \u0627\u0633\u062A.");
+    }
+    if (faDescription !== null && typeof faDescription !== "string") {
+      return failure(400, "OVERRIDE_INVALID_DESCRIPTION", "\u062A\u0648\u0636\u06CC\u062D\u0627\u062A \u0645\u062D\u0635\u0648\u0644 \u0646\u0627\u0645\u0639\u062A\u0628\u0631 \u0627\u0633\u062A.");
+    }
+    if (customCategory !== null && (typeof customCategory !== "string" || !PRODUCT_CATEGORIES.includes(customCategory))) {
+      return failure(400, "OVERRIDE_INVALID_CATEGORY", "\u062F\u0633\u062A\u0647\u200C\u0628\u0646\u062F\u06CC \u0645\u062D\u0635\u0648\u0644 \u0646\u0627\u0645\u0639\u062A\u0628\u0631 \u0627\u0633\u062A.");
+    }
+    if (typeof isFeatured !== "boolean" || typeof isBestseller !== "boolean") {
+      return failure(400, "OVERRIDE_INVALID_FLAGS", "\u0648\u0636\u0639\u06CC\u062A \u0648\u06CC\u0698\u0647 \u06CC\u0627 \u067E\u0631\u0641\u0631\u0648\u0634 \u0628\u0648\u062F\u0646 \u0645\u062D\u0635\u0648\u0644 \u0646\u0627\u0645\u0639\u062A\u0628\u0631 \u0627\u0633\u062A.");
+    }
+    const db = context.env.DB;
+    try {
+      const product = await db.prepare("SELECT id FROM products WHERE id = ?").bind(productId).first();
+      if (!product) return failure(404, "OVERRIDE_PRODUCT_NOT_FOUND", "\u0645\u062D\u0635\u0648\u0644 \u0645\u0648\u0631\u062F \u0646\u0638\u0631 \u06CC\u0627\u0641\u062A \u0646\u0634\u062F.");
+    } catch {
+      return failure(503, "OVERRIDE_PRODUCT_READ_FAILED", "\u0628\u0631\u0631\u0633\u06CC \u0645\u062D\u0635\u0648\u0644 \u062F\u0631 \u067E\u0627\u06CC\u06AF\u0627\u0647\u200C\u062F\u0627\u062F\u0647 \u0646\u0627\u0645\u0648\u0641\u0642 \u0628\u0648\u062F.");
+    }
+    try {
+      const result = await db.prepare(
+        `INSERT INTO product_overrides (product_id, fa_description, custom_category, is_featured, is_bestseller)
+         VALUES (?, ?, ?, ?, ?)
+         ON CONFLICT(product_id) DO UPDATE SET
+           fa_description = excluded.fa_description,
+           custom_category = excluded.custom_category,
+           is_featured = excluded.is_featured,
+           is_bestseller = excluded.is_bestseller`
+      ).bind(productId, faDescription, customCategory, Number(isFeatured), Number(isBestseller)).run();
+      if (!result.success) {
+        return failure(503, "OVERRIDE_SAVE_FAILED", "\u0630\u062E\u06CC\u0631\u0647 \u062A\u0646\u0638\u06CC\u0645\u0627\u062A \u0645\u062D\u0635\u0648\u0644 \u0646\u0627\u0645\u0648\u0641\u0642 \u0628\u0648\u062F.");
+      }
+    } catch {
+      return failure(503, "OVERRIDE_SAVE_FAILED", "\u0630\u062E\u06CC\u0631\u0647 \u062A\u0646\u0638\u06CC\u0645\u0627\u062A \u0645\u062D\u0635\u0648\u0644 \u0646\u0627\u0645\u0648\u0641\u0642 \u0628\u0648\u062F.");
+    }
+    return jsonResponse({
+      success: true,
+      data: { productId, faDescription, customCategory, isFeatured, isBestseller }
+    });
+  } catch {
+    return failure(500, "OVERRIDE_FAILED", "\u0639\u0645\u0644\u06CC\u0627\u062A \u062A\u0646\u0638\u06CC\u0645 \u0645\u062D\u0635\u0648\u0644 \u0646\u0627\u0645\u0648\u0641\u0642 \u0628\u0648\u062F.");
+  }
+}
+__name(onRequestPost6, "onRequestPost");
+
+// api/admin/receipts/action.ts
+var MAX_BODY_BYTES2 = 4096;
+async function readBody2(context) {
+  let raw;
+  try {
+    raw = await context.request.text();
+  } catch {
+    return null;
+  }
+  if (raw.length > MAX_BODY_BYTES2) return null;
+  try {
+    const parsed = JSON.parse(raw);
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return null;
+    return parsed;
+  } catch {
+    return null;
+  }
+}
+__name(readBody2, "readBody");
+async function approveReceipt(context, receipt) {
+  const db = context.env.DB;
+  const now = (/* @__PURE__ */ new Date()).toISOString();
+  const amount = Number(receipt.amount);
+  if (receipt.purpose === "product_purchase") {
+    if (!receipt.order_id) {
+      return failure(400, "RECEIPT_NO_ORDER", "\u0627\u06CC\u0646 \u0641\u06CC\u0634 \u0628\u0647 \u0633\u0641\u0627\u0631\u0634\u06CC \u0645\u062A\u0635\u0644 \u0646\u06CC\u0633\u062A.");
+    }
+    const results2 = await db.batch([
+      db.prepare(
+        `UPDATE orders SET status = 'paid'
+           WHERE id = ? AND status = 'pending'`
+      ).bind(receipt.order_id),
+      db.prepare(
+        `UPDATE payment_receipts SET status = 'APPROVED', reviewed_at = ?
+           WHERE id = ? AND status = 'PENDING'
+             AND EXISTS (SELECT 1 FROM orders WHERE id = ? AND status = 'paid')`
+      ).bind(now, receipt.id, receipt.order_id)
+    ]);
+    if ((results2[0]?.meta?.changes ?? 0) !== 1) {
+      return failure(409, "ORDER_NOT_PENDING", "\u0627\u06CC\u0646 \u0633\u0641\u0627\u0631\u0634 \u0642\u0628\u0644\u0627\u064B \u067E\u0631\u062F\u0627\u062E\u062A \u06CC\u0627 \u0644\u063A\u0648 \u0634\u062F\u0647 \u0627\u0633\u062A.");
+    }
+    return jsonResponse({
+      success: true,
+      message: "\u0641\u06CC\u0634 \u062A\u0627\u06CC\u06CC\u062F \u0634\u062F \u0648 \u0633\u0641\u0627\u0631\u0634 \u0628\u0647 \u0648\u0636\u0639\u06CC\u062A \u067E\u0631\u062F\u0627\u062E\u062A\u200C\u0634\u062F\u0647 \u062A\u063A\u06CC\u06CC\u0631 \u06A9\u0631\u062F.",
+      data: { receiptId: receipt.id, status: "APPROVED", orderId: receipt.order_id }
+    });
+  }
+  const transactionId = `txn_${crypto.randomUUID()}`;
+  const results = await db.batch([
+    db.prepare(
+      `UPDATE payment_receipts SET status = 'APPROVED', reviewed_at = ?
+         WHERE id = ? AND status = 'PENDING'`
+    ).bind(now, receipt.id),
+    db.prepare(
+      `UPDATE users SET balance = balance + ?, updated_at = ?
+         WHERE id = ?
+           AND NOT EXISTS (
+             SELECT 1 FROM wallet_transactions WHERE type = 'deposit' AND reference = ?
+           )`
+    ).bind(amount, now, receipt.user_id, receipt.id),
+    db.prepare(
+      `INSERT INTO wallet_transactions
+           (id, user_id, type, amount, balance_after, currency, description, reference, created_at)
+         SELECT ?, ?, 'deposit', ?, balance, 'IRT', ?, ?, ?
+         FROM users
+         WHERE id = ?
+           AND NOT EXISTS (
+             SELECT 1 FROM wallet_transactions WHERE type = 'deposit' AND reference = ?
+           )`
+    ).bind(
+      transactionId,
+      receipt.user_id,
+      amount,
+      "\u0634\u0627\u0631\u0698 \u06A9\u06CC\u0641 \u067E\u0648\u0644 (\u06A9\u0627\u0631\u062A \u0628\u0647 \u06A9\u0627\u0631\u062A)",
+      receipt.id,
+      now,
+      receipt.user_id,
+      receipt.id
+    )
+  ]);
+  if ((results[0]?.meta?.changes ?? 0) !== 1) {
+    return failure(409, "RECEIPT_ALREADY_REVIEWED", "\u0627\u06CC\u0646 \u0641\u06CC\u0634 \u0642\u0628\u0644\u0627\u064B \u0628\u0631\u0631\u0633\u06CC \u0634\u062F\u0647 \u0627\u0633\u062A.");
+  }
+  let balance = null;
+  try {
+    const row = await db.prepare("SELECT balance FROM users WHERE id = ?").bind(receipt.user_id).first();
+    balance = row ? Number(row.balance) : null;
+  } catch {
+    balance = null;
+  }
+  return jsonResponse({
+    success: true,
+    message: "\u0641\u06CC\u0634 \u062A\u0627\u06CC\u06CC\u062F \u0634\u062F \u0648 \u0645\u0648\u062C\u0648\u062F\u06CC \u06A9\u06CC\u0641 \u067E\u0648\u0644 \u06A9\u0627\u0631\u0628\u0631 \u0627\u0641\u0632\u0627\u06CC\u0634 \u06CC\u0627\u0641\u062A.",
+    data: { receiptId: receipt.id, status: "APPROVED", amount, balance }
+  });
+}
+__name(approveReceipt, "approveReceipt");
+async function rejectReceipt(context, receipt) {
+  const db = context.env.DB;
+  const now = (/* @__PURE__ */ new Date()).toISOString();
+  const statements = [
+    db.prepare(
+      `UPDATE payment_receipts SET status = 'REJECTED', reviewed_at = ?
+         WHERE id = ? AND status = 'PENDING'`
+    ).bind(now, receipt.id)
+  ];
+  if (receipt.purpose === "product_purchase" && receipt.order_id) {
+    statements.push(
+      db.prepare(
+        `UPDATE orders SET status = 'cancelled'
+           WHERE id = ? AND status = 'pending'`
+      ).bind(receipt.order_id)
+    );
+  }
+  const results = await db.batch(statements);
+  if ((results[0]?.meta?.changes ?? 0) !== 1) {
+    return failure(409, "RECEIPT_ALREADY_REVIEWED", "\u0627\u06CC\u0646 \u0641\u06CC\u0634 \u0642\u0628\u0644\u0627\u064B \u0628\u0631\u0631\u0633\u06CC \u0634\u062F\u0647 \u0627\u0633\u062A.");
+  }
+  return jsonResponse({
+    success: true,
+    message: "\u0641\u06CC\u0634 \u0631\u062F \u0634\u062F \u0648 \u062F\u0631 \u0635\u0648\u0631\u062A \u0648\u062C\u0648\u062F \u0633\u0641\u0627\u0631\u0634 \u062F\u0631 \u0627\u0646\u062A\u0638\u0627\u0631\u060C \u0644\u063A\u0648 \u06AF\u0631\u062F\u06CC\u062F.",
+    data: { receiptId: receipt.id, status: "REJECTED" }
+  });
+}
+__name(rejectReceipt, "rejectReceipt");
+async function onRequestPost7(context) {
+  try {
+    const auth = await authenticateAdmin(context.request, context.env);
+    if (!auth.ok) return failure(auth.status, auth.code, auth.message);
+    const body = await readBody2(context);
+    if (!body) return failure(400, "INVALID_BODY", "\u0633\u0627\u062E\u062A\u0627\u0631 \u062F\u0631\u062E\u0648\u0627\u0633\u062A \u0646\u0627\u0645\u0639\u062A\u0628\u0631 \u0627\u0633\u062A.");
+    const receiptId = typeof body.receiptId === "string" ? body.receiptId.trim() : "";
+    if (!receiptId || receiptId.length > 128) {
+      return failure(400, "INVALID_RECEIPT", "\u0634\u0646\u0627\u0633\u0647 \u0641\u06CC\u0634 \u0646\u0627\u0645\u0639\u062A\u0628\u0631 \u0627\u0633\u062A.");
+    }
+    if (body.action !== "approve" && body.action !== "reject") {
+      return failure(400, "INVALID_ACTION", "\u0627\u0642\u062F\u0627\u0645 \u0641\u06CC\u0634 \u0646\u0627\u0645\u0639\u062A\u0628\u0631 \u0627\u0633\u062A.");
+    }
+    const db = context.env.DB;
+    let receipt;
+    try {
+      receipt = await db.prepare(
+        `SELECT id, user_id, purpose, order_id, amount, status, reference
+           FROM payment_receipts WHERE id = ?`
+      ).bind(receiptId).first();
+    } catch {
+      return failure(503, "DB_UNAVAILABLE", "\u062E\u0648\u0627\u0646\u062F\u0646 \u0641\u06CC\u0634 \u0648\u0627\u0631\u06CC\u0632 \u0627\u0646\u062C\u0627\u0645 \u0646\u0634\u062F.");
+    }
+    if (!receipt) return failure(404, "RECEIPT_NOT_FOUND", "\u0641\u06CC\u0634 \u0648\u0627\u0631\u06CC\u0632 \u067E\u06CC\u062F\u0627 \u0646\u0634\u062F.");
+    if (receipt.status !== "PENDING") {
+      return failure(409, "RECEIPT_ALREADY_REVIEWED", "\u0627\u06CC\u0646 \u0641\u06CC\u0634 \u0642\u0628\u0644\u0627\u064B \u0628\u0631\u0631\u0633\u06CC \u0634\u062F\u0647 \u0627\u0633\u062A.");
+    }
+    return body.action === "approve" ? await approveReceipt(context, receipt) : await rejectReceipt(context, receipt);
+  } catch (cause) {
+    return internalFailure(cause, "RECEIPT_ACTION_FAILED");
+  }
+}
+__name(onRequestPost7, "onRequestPost");
+
+// api/admin/settings/bank.ts
+function normalizeCard(value) {
+  return value.replace(/[^\d]/g, "");
+}
+__name(normalizeCard, "normalizeCard");
+async function readSettings(db) {
+  const result = await db.prepare(
+    `SELECT key, value, updated_at FROM settings
+       WHERE key IN ('bank_card_number', 'bank_account_holder', 'bank_name')`
+  ).all();
+  const map = new Map((result.results ?? []).map((row) => [row.key, row]));
+  return {
+    cardNumber: map.get("bank_card_number")?.value ?? "",
+    accountHolder: map.get("bank_account_holder")?.value ?? "",
+    bankName: map.get("bank_name")?.value || void 0,
+    updatedAt: map.get("bank_card_number")?.updated_at ?? map.get("bank_account_holder")?.updated_at ?? null
+  };
+}
+__name(readSettings, "readSettings");
+async function onRequestGet4(context) {
+  try {
+    const auth = await authenticateAdmin(context.request, context.env);
+    if (!auth.ok) return failure(auth.status, auth.code, auth.message);
+    const db = context.env.DB;
+    return jsonResponse({ success: true, data: await readSettings(db) });
+  } catch (cause) {
+    return internalFailure(cause, "BANK_SETTINGS_READ_FAILED");
+  }
+}
+__name(onRequestGet4, "onRequestGet");
+async function onRequestPost8(context) {
+  try {
+    const auth = await authenticateAdmin(context.request, context.env);
+    if (!auth.ok) return failure(auth.status, auth.code, auth.message);
+    let raw;
+    try {
+      raw = await context.request.text();
+    } catch {
+      return failure(400, "INVALID_BODY", "\u0628\u062F\u0646\u0647 \u062F\u0631\u062E\u0648\u0627\u0633\u062A \u0642\u0627\u0628\u0644 \u062E\u0648\u0627\u0646\u062F\u0646 \u0646\u0628\u0648\u062F.");
+    }
+    if (raw.length > 4096) return failure(413, "INVALID_BODY", "\u062F\u0631\u062E\u0648\u0627\u0633\u062A \u0628\u06CC\u0634 \u0627\u0632 \u062D\u062F \u0628\u0632\u0631\u06AF \u0627\u0633\u062A.");
+    let body;
+    try {
+      const parsed = JSON.parse(raw);
+      if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+        return failure(400, "INVALID_BODY", "\u0633\u0627\u062E\u062A\u0627\u0631 \u062F\u0631\u062E\u0648\u0627\u0633\u062A \u0646\u0627\u0645\u0639\u062A\u0628\u0631 \u0627\u0633\u062A.");
+      }
+      body = parsed;
+    } catch {
+      return failure(400, "INVALID_BODY", "\u0633\u0627\u062E\u062A\u0627\u0631 \u062F\u0631\u062E\u0648\u0627\u0633\u062A \u0646\u0627\u0645\u0639\u062A\u0628\u0631 \u0627\u0633\u062A.");
+    }
+    const cardNumber = normalizeCard(typeof body.cardNumber === "string" ? body.cardNumber : "");
+    const accountHolder = typeof body.accountHolder === "string" ? body.accountHolder.trim() : "";
+    const bankName = typeof body.bankName === "string" ? body.bankName.trim() : "";
+    if (cardNumber.length !== 16) {
+      return failure(400, "INVALID_CARD", "\u0634\u0645\u0627\u0631\u0647 \u06A9\u0627\u0631\u062A \u0628\u0627\u06CC\u062F \u06F1\u06F6 \u0631\u0642\u0645 \u0628\u0627\u0634\u062F.");
+    }
+    if (accountHolder.length < 3 || accountHolder.length > 80) {
+      return failure(400, "INVALID_HOLDER", "\u0646\u0627\u0645 \u0635\u0627\u062D\u0628 \u062D\u0633\u0627\u0628 \u0631\u0627 \u06A9\u0627\u0645\u0644 \u0648\u0627\u0631\u062F \u06A9\u0646\u06CC\u062F.");
+    }
+    if (bankName.length > 80) {
+      return failure(400, "INVALID_BANK", "\u0646\u0627\u0645 \u0628\u0627\u0646\u06A9 \u0628\u06CC\u0634 \u0627\u0632 \u062D\u062F \u0637\u0648\u0644\u0627\u0646\u06CC \u0627\u0633\u062A.");
+    }
+    const db = context.env.DB;
+    const now = (/* @__PURE__ */ new Date()).toISOString();
+    const values = [
+      ["bank_card_number", cardNumber],
+      ["bank_account_holder", accountHolder],
+      ["bank_name", bankName]
+    ];
+    try {
+      await db.batch(
+        values.map(
+          ([key, value]) => db.prepare(
+            `INSERT INTO settings (key, value, updated_at)
+               VALUES (?, ?, ?)
+               ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at`
+          ).bind(key, value, now)
+        )
+      );
+    } catch {
+      return failure(503, "DB_UNAVAILABLE", "\u0630\u062E\u06CC\u0631\u0647 \u0627\u0637\u0644\u0627\u0639\u0627\u062A \u06A9\u0627\u0631\u062A \u0627\u0646\u062C\u0627\u0645 \u0646\u0634\u062F. \u062F\u0648\u0628\u0627\u0631\u0647 \u062A\u0644\u0627\u0634 \u06A9\u0646\u06CC\u062F.");
+    }
+    return jsonResponse({
+      success: true,
+      message: "\u0627\u0637\u0644\u0627\u0639\u0627\u062A \u06A9\u0627\u0631\u062A \u0630\u062E\u06CC\u0631\u0647 \u0634\u062F.",
+      data: await readSettings(db)
+    });
+  } catch (cause) {
+    return internalFailure(cause, "BANK_SETTINGS_WRITE_FAILED");
+  }
+}
+__name(onRequestPost8, "onRequestPost");
 
 // api/admin/settings/margins.ts
 async function readTiers(context) {
@@ -658,7 +1800,7 @@ async function readTiers(context) {
   }
 }
 __name(readTiers, "readTiers");
-async function onRequestGet2(context) {
+async function onRequestGet5(context) {
   const auth = await authenticateAdmin(context.request, context.env);
   if (!auth.ok) return failure(auth.status, auth.code, auth.message);
   return jsonResponse({
@@ -666,8 +1808,8 @@ async function onRequestGet2(context) {
     data: { tiers: await readTiers(context) }
   });
 }
-__name(onRequestGet2, "onRequestGet");
-async function onRequestPost3(context) {
+__name(onRequestGet5, "onRequestGet");
+async function onRequestPost9(context) {
   const auth = await authenticateAdmin(context.request, context.env);
   if (!auth.ok) return failure(auth.status, auth.code, auth.message);
   const rawBody = await context.request.text();
@@ -699,11 +1841,11 @@ async function onRequestPost3(context) {
   }
   return jsonResponse({ success: true, data: { tiers } });
 }
-__name(onRequestPost3, "onRequestPost");
+__name(onRequestPost9, "onRequestPost");
 
 // api/admin/wallet/adjust.ts
 var MAX_ADJUSTMENT = 1e9;
-var MAX_NOTE_LENGTH = 200;
+var MAX_NOTE_LENGTH2 = 200;
 function validateBody(body) {
   const userId = typeof body.userId === "string" ? body.userId.trim() : "";
   if (!userId || userId.length > 100) {
@@ -717,13 +1859,13 @@ function validateBody(body) {
     return { ok: false, message: "\u0645\u0628\u0644\u063A \u062A\u0639\u062F\u06CC\u0644 \u0628\u06CC\u0634 \u0627\u0632 \u062D\u062F \u0645\u062C\u0627\u0632 \u0627\u0633\u062A." };
   }
   const rawNote = typeof body.note === "string" ? body.note.trim() : "";
-  if (rawNote.length > MAX_NOTE_LENGTH) {
+  if (rawNote.length > MAX_NOTE_LENGTH2) {
     return { ok: false, message: "\u062A\u0648\u0636\u06CC\u062D \u062A\u0631\u0627\u06A9\u0646\u0634 \u0628\u06CC\u0634 \u0627\u0632 \u062D\u062F \u0637\u0648\u0644\u0627\u0646\u06CC \u0627\u0633\u062A." };
   }
   return { ok: true, value: { userId, amount, note: rawNote || null } };
 }
 __name(validateBody, "validateBody");
-async function onRequestPost4(context) {
+async function onRequestPost10(context) {
   const auth = await authenticateAdmin(context.request, context.env);
   if (!auth.ok) return failure(auth.status, auth.code, auth.message);
   const db = context.env.DB;
@@ -793,11 +1935,120 @@ async function onRequestPost4(context) {
     }
   });
 }
-__name(onRequestPost4, "onRequestPost");
+__name(onRequestPost10, "onRequestPost");
+
+// api/admin/orders.ts
+var ORDER_LIMIT = 500;
+async function onRequestGet6(context) {
+  const auth = await authenticateAdmin(context.request, context.env);
+  if (!auth.ok) return failure(auth.status, auth.code, auth.message);
+  const db = context.env.DB;
+  let rows;
+  try {
+    const result = await db.prepare(
+      `SELECT o.id, o.user_id, o.product_id, o.product_title, o.kind, o.quantity,
+                o.subtotal, o.discount, o.total, o.status, o.payment_method,
+                o.delivery_note, o.created_at,
+                u.first_name, u.last_name, u.username, u.telegram_id
+         FROM orders o
+         LEFT JOIN users u ON u.id = o.user_id
+         ORDER BY o.created_at DESC
+         LIMIT ?`
+    ).bind(ORDER_LIMIT).all();
+    rows = result.results ?? [];
+  } catch {
+    return failure(503, "DB_UNAVAILABLE", "\u062E\u0648\u0627\u0646\u062F\u0646 \u0633\u0641\u0627\u0631\u0634\u200C\u0647\u0627 \u0627\u0632 \u067E\u0627\u06CC\u06AF\u0627\u0647 \u062F\u0627\u062F\u0647 \u0627\u0646\u062C\u0627\u0645 \u0646\u0634\u062F.");
+  }
+  return jsonResponse({
+    success: true,
+    data: rows.map((row) => {
+      const fullName = [row.first_name, row.last_name].filter(Boolean).join(" ").trim();
+      return {
+        id: row.id,
+        userId: row.user_id,
+        userName: fullName || row.username || (row.telegram_id ? `\u06A9\u0627\u0631\u0628\u0631 ${row.telegram_id}` : void 0),
+        telegramId: row.telegram_id ?? void 0,
+        items: [
+          {
+            productId: row.product_id,
+            title: row.product_title,
+            kind: row.kind === "vpn" ? "vpn" : "account",
+            quantity: Number(row.quantity ?? 1),
+            unitPrice: Number(row.subtotal)
+          }
+        ],
+        subtotal: Number(row.subtotal),
+        discount: Number(row.discount),
+        total: Number(row.total),
+        currency: "IRT",
+        status: row.status,
+        kind: row.kind === "vpn" ? "vpn" : "account",
+        paymentMethod: row.payment_method === "card" ? "card" : "wallet",
+        deliveryNote: row.delivery_note ?? void 0,
+        createdAt: row.created_at,
+        updatedAt: row.created_at
+      };
+    }),
+    meta: { count: rows.length, limit: ORDER_LIMIT }
+  });
+}
+__name(onRequestGet6, "onRequestGet");
+
+// api/admin/receipts.ts
+var RECEIPT_LIMIT = 300;
+var STATUSES = /* @__PURE__ */ new Set(["PENDING", "APPROVED", "REJECTED"]);
+async function onRequestGet7(context) {
+  const auth = await authenticateAdmin(context.request, context.env);
+  if (!auth.ok) return failure(auth.status, auth.code, auth.message);
+  const url = new URL(context.request.url);
+  const requested = (url.searchParams.get("status") ?? "PENDING").toUpperCase();
+  const status = STATUSES.has(requested) ? requested : null;
+  const db = context.env.DB;
+  try {
+    const sql = `SELECT r.id, r.user_id, r.telegram_id, r.purpose, r.order_id, r.amount,
+                        r.currency, r.reference, r.status, r.note, r.created_at, r.reviewed_at,
+                        u.first_name, u.last_name, u.username, o.product_title
+                 FROM payment_receipts r
+                 LEFT JOIN users u ON u.id = r.user_id
+                 LEFT JOIN orders o ON o.id = r.order_id
+                 ${status ? "WHERE r.status = ?" : ""}
+                 ORDER BY r.created_at DESC
+                 LIMIT ?`;
+    const statement = db.prepare(sql);
+    const result = status ? await statement.bind(status, RECEIPT_LIMIT).all() : await statement.bind(RECEIPT_LIMIT).all();
+    const rows = result.results ?? [];
+    return jsonResponse({
+      success: true,
+      data: rows.map((row) => {
+        const fullName = [row.first_name, row.last_name].filter(Boolean).join(" ").trim();
+        return {
+          id: row.id,
+          userId: row.user_id,
+          telegramId: row.telegram_id,
+          userName: fullName || row.username || `\u06A9\u0627\u0631\u0628\u0631 ${row.telegram_id}`,
+          purpose: row.purpose,
+          orderId: row.order_id ?? void 0,
+          productTitle: row.product_title ?? void 0,
+          amount: Number(row.amount),
+          currency: row.currency,
+          reference: row.reference,
+          status: row.status,
+          note: row.note ?? void 0,
+          createdAt: row.created_at,
+          reviewedAt: row.reviewed_at ?? void 0
+        };
+      }),
+      meta: { count: rows.length, limit: RECEIPT_LIMIT, status: status ?? "all" }
+    });
+  } catch {
+    return failure(503, "DB_UNAVAILABLE", "\u062E\u0648\u0627\u0646\u062F\u0646 \u0641\u06CC\u0634\u200C\u0647\u0627\u06CC \u0648\u0627\u0631\u06CC\u0632 \u0627\u0646\u062C\u0627\u0645 \u0646\u0634\u062F.");
+  }
+}
+__name(onRequestGet7, "onRequestGet");
 
 // api/admin/users.ts
 var USER_LIMIT = 500;
-async function onRequestGet3(context) {
+async function onRequestGet8(context) {
   const auth = await authenticateAdmin(context.request, context.env);
   if (!auth.ok) return failure(auth.status, auth.code, auth.message);
   const db = context.env.DB;
@@ -854,7 +2105,7 @@ async function onRequestGet3(context) {
     meta: { count: rows.length, limit: USER_LIMIT }
   });
 }
-__name(onRequestGet3, "onRequestGet");
+__name(onRequestGet8, "onRequestGet");
 
 // api/auth/session.ts
 function bearerToken2(request) {
@@ -863,7 +2114,7 @@ function bearerToken2(request) {
   return match2?.[1]?.trim() ?? "";
 }
 __name(bearerToken2, "bearerToken");
-async function onRequestGet4(context) {
+async function onRequestGet9(context) {
   const { request, env } = context;
   const botToken = env.TELEGRAM_BOT_TOKEN?.trim();
   if (!botToken) {
@@ -922,7 +2173,7 @@ async function onRequestGet4(context) {
     return failure(503, "DB_UNAVAILABLE", "\u062E\u0648\u0627\u0646\u062F\u0646 \u062D\u0633\u0627\u0628 \u06A9\u0627\u0631\u0628\u0631 \u0627\u0632 \u067E\u0627\u06CC\u06AF\u0627\u0647\u200C\u062F\u0627\u062F\u0647 \u0627\u0646\u062C\u0627\u0645 \u0646\u0634\u062F.");
   }
 }
-__name(onRequestGet4, "onRequestGet");
+__name(onRequestGet9, "onRequestGet");
 
 // api/auth/telegram.ts
 var MAX_INIT_DATA_LENGTH = 8192;
@@ -937,7 +2188,7 @@ async function loadRole(db, userId, allowListed) {
   return allowListed || existing?.role === "admin" ? "admin" : "user";
 }
 __name(loadRole, "loadRole");
-async function onRequestPost5(context) {
+async function onRequestPost11(context) {
   const { request, env } = context;
   let body = {};
   try {
@@ -1029,7 +2280,7 @@ async function onRequestPost5(context) {
     return failure(503, "DB_UNAVAILABLE", "\u062B\u0628\u062A \u06CC\u0627 \u062E\u0648\u0627\u0646\u062F\u0646 \u062D\u0633\u0627\u0628 \u06A9\u0627\u0631\u0628\u0631 \u062F\u0631 \u067E\u0627\u06CC\u06AF\u0627\u0647\u200C\u062F\u0627\u062F\u0647 \u0627\u0646\u062C\u0627\u0645 \u0646\u0634\u062F.");
   }
 }
-__name(onRequestPost5, "onRequestPost");
+__name(onRequestPost11, "onRequestPost");
 
 // api/provider/products.ts
 var DEFAULT_PROVIDER_URL = "https://api.dummy-provider.com/v1/products";
@@ -1189,7 +2440,7 @@ function extractRows(payload) {
   return null;
 }
 __name(extractRows, "extractRows");
-async function onRequestGet5(context) {
+async function onRequestGet10(context) {
   const apiKey = context.env.ACCOUNTS_PROVIDER_API_KEY?.trim();
   if (!apiKey) {
     return jsonResponse2(
@@ -1314,7 +2565,573 @@ async function onRequestGet5(context) {
     }
   });
 }
-__name(onRequestGet5, "onRequestGet");
+__name(onRequestGet10, "onRequestGet");
+
+// api/_lib/userAuth.ts
+async function authenticateUser(request, env) {
+  const botToken = env.TELEGRAM_BOT_TOKEN?.trim();
+  const initData = request.headers.get("X-Telegram-Init-Data")?.trim();
+  if (initData) {
+    if (!botToken) {
+      return {
+        ok: false,
+        status: 500,
+        code: "SERVER_NOT_CONFIGURED",
+        message: "\u062A\u0648\u06A9\u0646 \u0631\u0628\u0627\u062A \u062F\u0631 \u062A\u0646\u0638\u06CC\u0645\u0627\u062A \u0633\u0631\u0648\u0631 \u0645\u0648\u062C\u0648\u062F \u0646\u06CC\u0633\u062A."
+      };
+    }
+    const user = await verifyInitData(initData, botToken);
+    if (!user) {
+      return {
+        ok: false,
+        status: 401,
+        code: "TELEGRAM_AUTH_INVALID",
+        message: "\u0646\u0634\u0633\u062A \u062A\u0644\u06AF\u0631\u0627\u0645 \u0645\u0639\u062A\u0628\u0631 \u0646\u06CC\u0633\u062A. \u0645\u06CC\u0646\u06CC\u200C\u0627\u067E \u0631\u0627 \u062F\u0648\u0628\u0627\u0631\u0647 \u0628\u0627\u0632 \u06A9\u0646\u06CC\u062F."
+      };
+    }
+    return { ok: true, user };
+  }
+  const demoTelegramId = Number(env.PURCHASE_DEMO_TELEGRAM_ID);
+  if (Number.isInteger(demoTelegramId) && demoTelegramId > 0) {
+    return { ok: true, user: { id: demoTelegramId, first_name: "\u06A9\u0627\u0631\u0628\u0631 \u0622\u0632\u0645\u0627\u06CC\u0634\u06CC" } };
+  }
+  return {
+    ok: false,
+    status: 401,
+    code: "TELEGRAM_AUTH_REQUIRED",
+    message: "\u0628\u0631\u0627\u06CC \u0645\u0634\u0627\u0647\u062F\u0647 \u0627\u06CC\u0646 \u0628\u062E\u0634 \u0628\u0627\u06CC\u062F \u0645\u06CC\u0646\u06CC\u200C\u0627\u067E \u0631\u0627 \u0627\u0632 \u062F\u0627\u062E\u0644 \u062A\u0644\u06AF\u0631\u0627\u0645 \u0628\u0627\u0632 \u06A9\u0646\u06CC\u062F."
+  };
+}
+__name(authenticateUser, "authenticateUser");
+function userIdFor(user) {
+  return `usr_tg_${user.id}`;
+}
+__name(userIdFor, "userIdFor");
+
+// api/static-ip/download.ts
+var headers = {
+  "cache-control": "no-store",
+  "referrer-policy": "no-referrer",
+  "x-content-type-options": "nosniff"
+};
+function failure2(status, code, message) {
+  return Response.json({ success: false, code, message }, { status, headers });
+}
+__name(failure2, "failure");
+async function onRequestPost12(context) {
+  const auth = await authenticateUser(context.request, context.env);
+  if (!auth.ok) return failure2(auth.status, auth.code, auth.message);
+  const db = context.env.DB;
+  const botToken = context.env.TELEGRAM_BOT_TOKEN?.trim();
+  if (!db) return failure2(503, "DB_NOT_CONFIGURED", "\u067E\u0627\u06CC\u06AF\u0627\u0647 \u062F\u0627\u062F\u0647 \u062A\u0646\u0638\u06CC\u0645 \u0646\u0634\u062F\u0647 \u0627\u0633\u062A.");
+  if (!botToken) return failure2(503, "TELEGRAM_NOT_CONFIGURED", "\u062A\u0648\u06A9\u0646 \u0631\u0628\u0627\u062A \u062A\u0646\u0638\u06CC\u0645 \u0646\u0634\u062F\u0647 \u0627\u0633\u062A.");
+  let body;
+  try {
+    body = await context.request.json();
+  } catch {
+    return failure2(400, "INVALID_BODY", "\u062F\u0631\u062E\u0648\u0627\u0633\u062A \u0646\u0627\u0645\u0639\u062A\u0628\u0631 \u0627\u0633\u062A.");
+  }
+  const orderId = typeof body?.orderId === "string" ? body.orderId.trim() : "";
+  if (!orderId || orderId.length > 128) return failure2(400, "INVALID_ORDER", "\u0634\u0646\u0627\u0633\u0647 \u0633\u0641\u0627\u0631\u0634 \u0646\u0627\u0645\u0639\u062A\u0628\u0631 \u0627\u0633\u062A.");
+  try {
+    const note = await findOwnedConfig(db, orderId, userIdFor(auth.user));
+    if (!note) return failure2(404, "CONFIG_NOT_FOUND", "\u06A9\u0627\u0646\u0641\u06CC\u06AF \u062A\u062D\u0648\u06CC\u0644\u200C\u0634\u062F\u0647 \u067E\u06CC\u062F\u0627 \u0646\u0634\u062F.");
+    const token = await createStaticIpDownloadToken(auth.user.id, orderId, botToken);
+    return Response.json({ success: true, data: { token } }, { headers });
+  } catch {
+    return failure2(503, "DB_UNAVAILABLE", "\u062E\u0648\u0627\u0646\u062F\u0646 \u06A9\u0627\u0646\u0641\u06CC\u06AF \u0627\u0632 \u067E\u0627\u06CC\u06AF\u0627\u0647 \u062F\u0627\u062F\u0647 \u0627\u0646\u062C\u0627\u0645 \u0646\u0634\u062F.");
+  }
+}
+__name(onRequestPost12, "onRequestPost");
+async function onRequestGet11(context) {
+  const db = context.env.DB;
+  const botToken = context.env.TELEGRAM_BOT_TOKEN?.trim();
+  if (!db) return failure2(503, "DB_NOT_CONFIGURED", "\u067E\u0627\u06CC\u06AF\u0627\u0647 \u062F\u0627\u062F\u0647 \u062A\u0646\u0638\u06CC\u0645 \u0646\u0634\u062F\u0647 \u0627\u0633\u062A.");
+  if (!botToken) return failure2(503, "TELEGRAM_NOT_CONFIGURED", "\u062A\u0648\u06A9\u0646 \u0631\u0628\u0627\u062A \u062A\u0646\u0638\u06CC\u0645 \u0646\u0634\u062F\u0647 \u0627\u0633\u062A.");
+  const params = new URL(context.request.url).searchParams;
+  const orderId = params.get("orderId")?.trim() ?? "";
+  const token = params.get("token") ?? "";
+  if (!orderId || orderId.length > 128 || !token) return failure2(400, "INVALID_REQUEST", "\u062F\u0631\u062E\u0648\u0627\u0633\u062A \u0646\u0627\u0645\u0639\u062A\u0628\u0631 \u0627\u0633\u062A.");
+  const telegramId = await verifyStaticIpDownloadToken(token, orderId, botToken);
+  if (!telegramId) return failure2(401, "DOWNLOAD_TOKEN_INVALID", "\u0644\u06CC\u0646\u06A9 \u062F\u0627\u0646\u0644\u0648\u062F \u0645\u0639\u062A\u0628\u0631 \u0646\u06CC\u0633\u062A \u06CC\u0627 \u0645\u0646\u0642\u0636\u06CC \u0634\u062F\u0647 \u0627\u0633\u062A.");
+  try {
+    const note = await findOwnedConfig(db, orderId, `usr_tg_${telegramId}`);
+    if (!note) return failure2(404, "CONFIG_NOT_FOUND", "\u06A9\u0627\u0646\u0641\u06CC\u06AF \u062A\u062D\u0648\u06CC\u0644\u200C\u0634\u062F\u0647 \u067E\u06CC\u062F\u0627 \u0646\u0634\u062F.");
+    return new Response(note, { headers: {
+      ...headers,
+      "content-type": "application/x-openvpn-profile",
+      "content-disposition": 'attachment; filename="varnet-config.ovpn"'
+    } });
+  } catch {
+    return failure2(503, "DB_UNAVAILABLE", "\u062E\u0648\u0627\u0646\u062F\u0646 \u06A9\u0627\u0646\u0641\u06CC\u06AF \u0627\u0632 \u067E\u0627\u06CC\u06AF\u0627\u0647 \u062F\u0627\u062F\u0647 \u0627\u0646\u062C\u0627\u0645 \u0646\u0634\u062F.");
+  }
+}
+__name(onRequestGet11, "onRequestGet");
+
+// api/static-ip/nodes.ts
+var RESPONSE_HEADERS3 = {
+  "content-type": "application/json; charset=utf-8",
+  "cache-control": "no-store",
+  "x-content-type-options": "nosniff"
+};
+function jsonResponse3(body, status = 200) {
+  return new Response(JSON.stringify(body), { status, headers: RESPONSE_HEADERS3 });
+}
+__name(jsonResponse3, "jsonResponse");
+function failure3(status, code, message) {
+  return jsonResponse3({ success: false, code, message }, status);
+}
+__name(failure3, "failure");
+function toNode(row) {
+  return {
+    id: row.id,
+    name: row.name,
+    ip: row.ip,
+    country: row.country,
+    countryCode: row.country_code,
+    protocol: row.protocol,
+    price: Number(row.price),
+    currency: "IRT",
+    durationDays: Number(row.duration_days),
+    dataCapGb: Number(row.data_cap_gb),
+    availability: row.availability,
+    enabled: Number(row.is_enabled) === 1,
+    sortOrder: Number(row.sort_order),
+    createdAt: row.created_at,
+    updatedAt: row.updated_at
+  };
+}
+__name(toNode, "toNode");
+async function onRequestGet12(context) {
+  const db = context.env.DB;
+  if (!db) return failure3(503, "DB_NOT_CONFIGURED", "\u067E\u0627\u06CC\u06AF\u0627\u0647 \u062F\u0627\u062F\u0647 \u0646\u0648\u062F\u0647\u0627 \u062F\u0631 \u0633\u0631\u0648\u0631 \u062A\u0646\u0638\u06CC\u0645 \u0646\u0634\u062F\u0647 \u0627\u0633\u062A.");
+  let rows;
+  try {
+    const result = await db.prepare(
+      `SELECT id, name, ip, country, country_code, protocol, price, currency,
+                duration_days, data_cap_gb, availability, is_enabled, sort_order,
+                created_at, updated_at
+         FROM static_ip_nodes
+         WHERE is_enabled = 1
+         ORDER BY sort_order ASC, created_at ASC`
+    ).all();
+    rows = result.results ?? [];
+  } catch {
+    return failure3(503, "DB_UNAVAILABLE", "\u062E\u0648\u0627\u0646\u062F\u0646 \u0646\u0648\u062F\u0647\u0627\u06CC \u0622\u06CC\u200C\u067E\u06CC \u062B\u0627\u0628\u062A \u0627\u0632 \u067E\u0627\u06CC\u06AF\u0627\u0647 \u062F\u0627\u062F\u0647 \u0627\u0646\u062C\u0627\u0645 \u0646\u0634\u062F.");
+  }
+  return jsonResponse3({
+    success: true,
+    data: rows.map(toNode),
+    meta: { count: rows.length }
+  });
+}
+__name(onRequestGet12, "onRequestGet");
+
+// api/static-ip/plans.ts
+var RESPONSE_HEADERS4 = {
+  "content-type": "application/json; charset=utf-8",
+  "cache-control": "no-store",
+  "x-content-type-options": "nosniff"
+};
+function jsonResponse4(body, status = 200) {
+  return new Response(JSON.stringify(body), { status, headers: RESPONSE_HEADERS4 });
+}
+__name(jsonResponse4, "jsonResponse");
+function failure4(status, code, message) {
+  return jsonResponse4({ success: false, code, message }, status);
+}
+__name(failure4, "failure");
+function toPlan(row) {
+  return {
+    id: row.id,
+    nodeId: row.node_id,
+    name: row.name,
+    dataCapGb: Number(row.data_cap_gb),
+    durationDays: Number(row.duration_days),
+    price: Number(row.price),
+    currency: "IRT",
+    enabled: Number(row.is_enabled) === 1,
+    sortOrder: Number(row.sort_order),
+    nodeName: row.node_name,
+    country: row.country,
+    countryCode: row.country_code,
+    protocol: row.protocol,
+    availability: row.availability,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at
+  };
+}
+__name(toPlan, "toPlan");
+async function onRequestGet13(context) {
+  const db = context.env.DB;
+  if (!db) return failure4(503, "DB_NOT_CONFIGURED", "\u067E\u0627\u06CC\u06AF\u0627\u0647 \u062F\u0627\u062F\u0647 \u067E\u0644\u0646\u200C\u0647\u0627 \u062F\u0631 \u0633\u0631\u0648\u0631 \u062A\u0646\u0638\u06CC\u0645 \u0646\u0634\u062F\u0647 \u0627\u0633\u062A.");
+  let rows;
+  try {
+    const result = await db.prepare(
+      `SELECT p.id, p.node_id, p.name, p.data_cap_gb, p.duration_days, p.price,
+                p.currency, p.is_enabled, p.sort_order, p.created_at, p.updated_at,
+                n.name AS node_name, n.country, n.country_code, n.protocol, n.availability
+         FROM static_ip_plans p
+         JOIN static_ip_nodes n ON n.id = p.node_id
+         WHERE p.is_enabled = 1 AND n.is_enabled = 1
+         ORDER BY p.sort_order ASC, p.created_at ASC`
+    ).all();
+    rows = result.results ?? [];
+  } catch {
+    return failure4(503, "DB_UNAVAILABLE", "\u062E\u0648\u0627\u0646\u062F\u0646 \u067E\u0644\u0646\u200C\u0647\u0627\u06CC \u0622\u06CC\u200C\u067E\u06CC \u062B\u0627\u0628\u062A \u0627\u0632 \u067E\u0627\u06CC\u06AF\u0627\u0647 \u062F\u0627\u062F\u0647 \u0627\u0646\u062C\u0627\u0645 \u0646\u0634\u062F.");
+  }
+  return jsonResponse4({
+    success: true,
+    data: rows.map(toPlan),
+    meta: { count: rows.length }
+  });
+}
+__name(onRequestGet13, "onRequestGet");
+
+// api/static-ip/resend.ts
+function failure5(status, code, message) {
+  return Response.json({ success: false, code, message }, { status, headers: { "cache-control": "no-store" } });
+}
+__name(failure5, "failure");
+async function onRequestPost13(context) {
+  const auth = await authenticateUser(context.request, context.env);
+  if (!auth.ok) return failure5(auth.status, auth.code, auth.message);
+  const db = context.env.DB;
+  if (!db) return failure5(503, "DB_NOT_CONFIGURED", "\u067E\u0627\u06CC\u06AF\u0627\u0647 \u062F\u0627\u062F\u0647 \u062A\u0646\u0638\u06CC\u0645 \u0646\u0634\u062F\u0647 \u0627\u0633\u062A.");
+  let body;
+  try {
+    body = await context.request.json();
+  } catch {
+    return failure5(400, "INVALID_BODY", "\u062F\u0631\u062E\u0648\u0627\u0633\u062A \u0646\u0627\u0645\u0639\u062A\u0628\u0631 \u0627\u0633\u062A.");
+  }
+  const orderId = typeof body?.orderId === "string" ? body.orderId.trim() : "";
+  if (!orderId || orderId.length > 128) return failure5(400, "INVALID_ORDER", "\u0634\u0646\u0627\u0633\u0647 \u0633\u0641\u0627\u0631\u0634 \u0646\u0627\u0645\u0639\u062A\u0628\u0631 \u0627\u0633\u062A.");
+  let note;
+  try {
+    note = await findOwnedConfig(db, orderId, userIdFor(auth.user));
+  } catch {
+    return failure5(503, "DB_UNAVAILABLE", "\u062E\u0648\u0627\u0646\u062F\u0646 \u06A9\u0627\u0646\u0641\u06CC\u06AF \u0627\u0632 \u067E\u0627\u06CC\u06AF\u0627\u0647 \u062F\u0627\u062F\u0647 \u0627\u0646\u062C\u0627\u0645 \u0646\u0634\u062F.");
+  }
+  if (!note) return failure5(404, "CONFIG_NOT_FOUND", "\u06A9\u0627\u0646\u0641\u06CC\u06AF \u062A\u062D\u0648\u06CC\u0644\u200C\u0634\u062F\u0647 \u067E\u06CC\u062F\u0627 \u0646\u0634\u062F.");
+  const result = await sendVpnDocument(context.env.TELEGRAM_BOT_TOKEN, auth.user.id, note);
+  if (!result.sent) return failure5(502, result.code, result.message);
+  return Response.json({ success: true, message: "\u0641\u0627\u06CC\u0644 \u0628\u0647 \u062A\u0644\u06AF\u0631\u0627\u0645 \u0634\u0645\u0627 \u0627\u0631\u0633\u0627\u0644 \u0634\u062F." }, { headers: { "cache-control": "no-store" } });
+}
+__name(onRequestPost13, "onRequestPost");
+
+// api/static-ip/services.ts
+var SERVICE_LIMIT = 50;
+var RESPONSE_HEADERS5 = {
+  "content-type": "application/json; charset=utf-8",
+  "cache-control": "no-store",
+  "x-content-type-options": "nosniff"
+};
+function jsonResponse5(body, status = 200) {
+  return new Response(JSON.stringify(body), { status, headers: RESPONSE_HEADERS5 });
+}
+__name(jsonResponse5, "jsonResponse");
+function failure6(status, code, message) {
+  return jsonResponse5({ success: false, code, message }, status);
+}
+__name(failure6, "failure");
+async function onRequestGet14(context) {
+  const auth = await authenticateUser(context.request, context.env);
+  if (!auth.ok) return failure6(auth.status, auth.code, auth.message);
+  const db = context.env.DB;
+  if (!db) return failure6(503, "DB_NOT_CONFIGURED", "\u067E\u0627\u06CC\u06AF\u0627\u0647 \u062F\u0627\u062F\u0647 \u0633\u0631\u0648\u06CC\u0633\u200C\u0647\u0627 \u062F\u0631 \u0633\u0631\u0648\u0631 \u062A\u0646\u0638\u06CC\u0645 \u0646\u0634\u062F\u0647 \u0627\u0633\u062A.");
+  let rows;
+  try {
+    const result = await db.prepare(
+      `SELECT id, product_title, total, currency, status, delivery_note, created_at
+         FROM orders
+         WHERE user_id = ? AND kind = 'vpn'
+           AND status IN ('pending', 'paid', 'completed')
+         ORDER BY created_at DESC
+         LIMIT ?`
+    ).bind(userIdFor(auth.user), SERVICE_LIMIT).all();
+    rows = result.results ?? [];
+  } catch {
+    return failure6(503, "DB_UNAVAILABLE", "\u062E\u0648\u0627\u0646\u062F\u0646 \u0633\u0631\u0648\u06CC\u0633\u200C\u0647\u0627\u06CC \u0641\u0639\u0627\u0644 \u0627\u0632 \u067E\u0627\u06CC\u06AF\u0627\u0647 \u062F\u0627\u062F\u0647 \u0627\u0646\u062C\u0627\u0645 \u0646\u0634\u062F.");
+  }
+  return jsonResponse5({
+    success: true,
+    data: rows.map((row) => ({
+      id: row.id,
+      orderId: row.id,
+      planName: row.product_title,
+      status: row.status,
+      deliveryNote: row.delivery_note,
+      amount: Number(row.total),
+      currency: "IRT",
+      purchasedAt: row.created_at,
+      completedAt: row.created_at
+    })),
+    meta: { count: rows.length, limit: SERVICE_LIMIT }
+  });
+}
+__name(onRequestGet14, "onRequestGet");
+
+// api/wallet/receipt.ts
+var MIN_AMOUNT = 1e4;
+var MAX_AMOUNT = 1e7;
+var MAX_BODY_BYTES3 = 4096;
+var RESPONSE_HEADERS6 = {
+  "content-type": "application/json; charset=utf-8",
+  "cache-control": "no-store",
+  "x-content-type-options": "nosniff"
+};
+function jsonResponse6(body, status = 200) {
+  return new Response(JSON.stringify(body), { status, headers: RESPONSE_HEADERS6 });
+}
+__name(jsonResponse6, "jsonResponse");
+function failure7(status, code, message) {
+  return jsonResponse6({ success: false, code, message }, status);
+}
+__name(failure7, "failure");
+async function authenticate(request, env) {
+  const botToken = env.TELEGRAM_BOT_TOKEN?.trim();
+  const initData = request.headers.get("X-Telegram-Init-Data")?.trim();
+  if (initData) {
+    if (!botToken) {
+      return { ok: false, status: 500, code: "SERVER_NOT_CONFIGURED", message: "\u062A\u0648\u06A9\u0646 \u0631\u0628\u0627\u062A \u062F\u0631 \u062A\u0646\u0638\u06CC\u0645\u0627\u062A \u0633\u0631\u0648\u0631 \u0645\u0648\u062C\u0648\u062F \u0646\u06CC\u0633\u062A." };
+    }
+    const user = await verifyInitData(initData, botToken);
+    if (!user) {
+      return {
+        ok: false,
+        status: 401,
+        code: "TELEGRAM_AUTH_INVALID",
+        message: "\u0646\u0634\u0633\u062A \u062A\u0644\u06AF\u0631\u0627\u0645 \u0645\u0639\u062A\u0628\u0631 \u0646\u06CC\u0633\u062A. \u0645\u06CC\u0646\u06CC\u200C\u0627\u067E \u0631\u0627 \u062F\u0648\u0628\u0627\u0631\u0647 \u0628\u0627\u0632 \u06A9\u0646\u06CC\u062F."
+      };
+    }
+    return { ok: true, user };
+  }
+  const demoTelegramId = Number(env.PURCHASE_DEMO_TELEGRAM_ID);
+  if (Number.isInteger(demoTelegramId) && demoTelegramId > 0) {
+    return { ok: true, user: { id: demoTelegramId, first_name: "\u06A9\u0627\u0631\u0628\u0631 \u0622\u0632\u0645\u0627\u06CC\u0634\u06CC" } };
+  }
+  return {
+    ok: false,
+    status: 401,
+    code: "TELEGRAM_AUTH_REQUIRED",
+    message: "\u0628\u0631\u0627\u06CC \u062B\u0628\u062A \u0641\u06CC\u0634 \u0648\u0627\u0631\u06CC\u0632 \u0628\u0627\u06CC\u062F \u0645\u06CC\u0646\u06CC\u200C\u0627\u067E \u0631\u0627 \u0627\u0632 \u062F\u0627\u062E\u0644 \u062A\u0644\u06AF\u0631\u0627\u0645 \u0628\u0627\u0632 \u06A9\u0646\u06CC\u062F."
+  };
+}
+__name(authenticate, "authenticate");
+function userIdFor2(user) {
+  return `usr_tg_${user.id}`;
+}
+__name(userIdFor2, "userIdFor");
+async function onRequestPost14(context) {
+  try {
+    const auth = await authenticate(context.request, context.env);
+    if (!auth.ok) return failure7(auth.status, auth.code, auth.message);
+    const db = context.env.DB;
+    if (!db) return failure7(503, "DB_NOT_CONFIGURED", "\u067E\u0627\u06CC\u06AF\u0627\u0647 \u062F\u0627\u062F\u0647 \u06A9\u06CC\u0641 \u067E\u0648\u0644 \u062F\u0631 \u0633\u0631\u0648\u0631 \u062A\u0646\u0638\u06CC\u0645 \u0646\u0634\u062F\u0647 \u0627\u0633\u062A.");
+    let raw;
+    try {
+      raw = await context.request.text();
+    } catch {
+      return failure7(400, "INVALID_BODY", "\u0628\u062F\u0646\u0647 \u062F\u0631\u062E\u0648\u0627\u0633\u062A \u0642\u0627\u0628\u0644 \u062E\u0648\u0627\u0646\u062F\u0646 \u0646\u0628\u0648\u062F.");
+    }
+    if (raw.length > MAX_BODY_BYTES3) return failure7(413, "INVALID_BODY", "\u062F\u0631\u062E\u0648\u0627\u0633\u062A \u0628\u06CC\u0634 \u0627\u0632 \u062D\u062F \u0628\u0632\u0631\u06AF \u0627\u0633\u062A.");
+    let body;
+    try {
+      const parsed = JSON.parse(raw);
+      if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+        return failure7(400, "INVALID_BODY", "\u0633\u0627\u062E\u062A\u0627\u0631 \u062F\u0631\u062E\u0648\u0627\u0633\u062A \u0646\u0627\u0645\u0639\u062A\u0628\u0631 \u0627\u0633\u062A.");
+      }
+      body = parsed;
+    } catch {
+      return failure7(400, "INVALID_BODY", "\u0633\u0627\u062E\u062A\u0627\u0631 \u062F\u0631\u062E\u0648\u0627\u0633\u062A \u0646\u0627\u0645\u0639\u062A\u0628\u0631 \u0627\u0633\u062A.");
+    }
+    const amount = typeof body.amount === "number" ? body.amount : Number.NaN;
+    if (!Number.isInteger(amount) || amount < MIN_AMOUNT || amount > MAX_AMOUNT) {
+      return failure7(400, "INVALID_AMOUNT", "\u0645\u0628\u0644\u063A \u0648\u0627\u0631\u06CC\u0632 \u062E\u0627\u0631\u062C \u0627\u0632 \u0645\u062D\u062F\u0648\u062F\u0647 \u0645\u062C\u0627\u0632 \u0627\u0633\u062A.");
+    }
+    const reference = typeof body.reference === "string" ? body.reference.trim() : "";
+    if (reference.length < 4 || reference.length > 64) {
+      return failure7(400, "INVALID_REFERENCE", "\u0634\u0645\u0627\u0631\u0647 \u067E\u06CC\u06AF\u06CC\u0631\u06CC \u0648\u0627\u0631\u06CC\u0632 \u0631\u0627 \u06A9\u0627\u0645\u0644 \u0648\u0627\u0631\u062F \u06A9\u0646\u06CC\u062F.");
+    }
+    const userId = userIdFor2(auth.user);
+    const now = (/* @__PURE__ */ new Date()).toISOString();
+    const receiptId = `rcp_${crypto.randomUUID()}`;
+    try {
+      await db.prepare(
+        `INSERT INTO payment_receipts
+             (id, user_id, telegram_id, purpose, order_id, amount, currency, reference, status, created_at)
+           VALUES (?, ?, ?, 'wallet_topup', NULL, ?, 'IRT', ?, 'PENDING', ?)`
+      ).bind(receiptId, userId, auth.user.id, amount, reference, now).run();
+    } catch {
+      return failure7(503, "DB_UNAVAILABLE", "\u062B\u0628\u062A \u0641\u06CC\u0634 \u0648\u0627\u0631\u06CC\u0632 \u0627\u0646\u062C\u0627\u0645 \u0646\u0634\u062F. \u062F\u0648\u0628\u0627\u0631\u0647 \u062A\u0644\u0627\u0634 \u06A9\u0646\u06CC\u062F.");
+    }
+    return jsonResponse6({
+      success: true,
+      message: "\u0641\u06CC\u0634 \u0648\u0627\u0631\u06CC\u0632 \u062B\u0628\u062A \u0634\u062F \u0648 \u067E\u0633 \u0627\u0632 \u062A\u0627\u06CC\u06CC\u062F \u0627\u062F\u0645\u06CC\u0646 \u0628\u0647 \u0645\u0648\u062C\u0648\u062F\u06CC \u0634\u0645\u0627 \u0627\u0636\u0627\u0641\u0647 \u0645\u06CC\u200C\u0634\u0648\u062F.",
+      data: { receiptId, amount, status: "PENDING", createdAt: now }
+    });
+  } catch (cause) {
+    return jsonResponse6(
+      {
+        success: false,
+        code: "RECEIPT_FAILED",
+        message: cause instanceof Error && cause.message ? cause.message : "\u062B\u0628\u062A \u0641\u06CC\u0634 \u0648\u0627\u0631\u06CC\u0632 \u0627\u0646\u062C\u0627\u0645 \u0646\u0634\u062F."
+      },
+      500
+    );
+  }
+}
+__name(onRequestPost14, "onRequestPost");
+
+// api/bank.ts
+var RESPONSE_HEADERS7 = {
+  "content-type": "application/json; charset=utf-8",
+  "cache-control": "no-store",
+  "x-content-type-options": "nosniff"
+};
+async function onRequestGet15(context) {
+  const db = context.env.DB;
+  if (!db) {
+    return new Response(
+      JSON.stringify({ success: false, code: "DB_NOT_CONFIGURED", message: "\u067E\u0627\u06CC\u06AF\u0627\u0647 \u062F\u0627\u062F\u0647 \u062A\u0646\u0638\u06CC\u0645\u0627\u062A \u062F\u0631 \u0633\u0631\u0648\u0631 \u0622\u0645\u0627\u062F\u0647 \u0646\u06CC\u0633\u062A." }),
+      { status: 503, headers: RESPONSE_HEADERS7 }
+    );
+  }
+  try {
+    const result = await db.prepare(
+      `SELECT key, value, updated_at FROM settings
+         WHERE key IN ('bank_card_number', 'bank_account_holder', 'bank_name')`
+    ).all();
+    const values = new Map((result.results ?? []).map((row) => [row.key, row]));
+    const card = values.get("bank_card_number");
+    const holder = values.get("bank_account_holder");
+    return new Response(
+      JSON.stringify({
+        success: true,
+        data: {
+          cardNumber: card?.value ?? "",
+          accountHolder: holder?.value ?? "",
+          bankName: values.get("bank_name")?.value || void 0,
+          updatedAt: card?.updated_at ?? holder?.updated_at ?? null
+        }
+      }),
+      { headers: RESPONSE_HEADERS7 }
+    );
+  } catch {
+    return new Response(
+      JSON.stringify({ success: false, code: "DB_UNAVAILABLE", message: "\u062E\u0648\u0627\u0646\u062F\u0646 \u0627\u0637\u0644\u0627\u0639\u0627\u062A \u06A9\u0627\u0631\u062A \u0627\u0646\u062C\u0627\u0645 \u0646\u0634\u062F." }),
+      { status: 503, headers: RESPONSE_HEADERS7 }
+    );
+  }
+}
+__name(onRequestGet15, "onRequestGet");
+
+// api/orders.ts
+var ORDER_LIMIT2 = 100;
+var RESPONSE_HEADERS8 = {
+  "content-type": "application/json; charset=utf-8",
+  "cache-control": "no-store",
+  "x-content-type-options": "nosniff"
+};
+function jsonResponse7(body, status = 200) {
+  return new Response(JSON.stringify(body), { status, headers: RESPONSE_HEADERS8 });
+}
+__name(jsonResponse7, "jsonResponse");
+function failure8(status, code, message) {
+  return jsonResponse7({ success: false, code, message }, status);
+}
+__name(failure8, "failure");
+async function authenticate2(request, env) {
+  const botToken = env.TELEGRAM_BOT_TOKEN?.trim();
+  const initData = request.headers.get("X-Telegram-Init-Data")?.trim();
+  if (initData) {
+    if (!botToken) {
+      return {
+        ok: false,
+        status: 500,
+        code: "SERVER_NOT_CONFIGURED",
+        message: "\u062A\u0648\u06A9\u0646 \u0631\u0628\u0627\u062A \u062F\u0631 \u062A\u0646\u0638\u06CC\u0645\u0627\u062A \u0633\u0631\u0648\u0631 \u0645\u0648\u062C\u0648\u062F \u0646\u06CC\u0633\u062A."
+      };
+    }
+    const user = await verifyInitData(initData, botToken);
+    if (!user) {
+      return {
+        ok: false,
+        status: 401,
+        code: "TELEGRAM_AUTH_INVALID",
+        message: "\u0646\u0634\u0633\u062A \u062A\u0644\u06AF\u0631\u0627\u0645 \u0645\u0639\u062A\u0628\u0631 \u0646\u06CC\u0633\u062A. \u0645\u06CC\u0646\u06CC\u200C\u0627\u067E \u0631\u0627 \u062F\u0648\u0628\u0627\u0631\u0647 \u0628\u0627\u0632 \u06A9\u0646\u06CC\u062F."
+      };
+    }
+    return { ok: true, user };
+  }
+  const demoTelegramId = Number(env.PURCHASE_DEMO_TELEGRAM_ID);
+  if (Number.isInteger(demoTelegramId) && demoTelegramId > 0) {
+    return { ok: true, user: { id: demoTelegramId, first_name: "\u06A9\u0627\u0631\u0628\u0631 \u0622\u0632\u0645\u0627\u06CC\u0634\u06CC" } };
+  }
+  return {
+    ok: false,
+    status: 401,
+    code: "TELEGRAM_AUTH_REQUIRED",
+    message: "\u0628\u0631\u0627\u06CC \u062F\u06CC\u062F\u0646 \u0633\u0641\u0627\u0631\u0634\u200C\u0647\u0627 \u0628\u0627\u06CC\u062F \u0645\u06CC\u0646\u06CC\u200C\u0627\u067E \u0631\u0627 \u0627\u0632 \u062F\u0627\u062E\u0644 \u062A\u0644\u06AF\u0631\u0627\u0645 \u0628\u0627\u0632 \u06A9\u0646\u06CC\u062F."
+  };
+}
+__name(authenticate2, "authenticate");
+function userIdFor3(user) {
+  return `usr_tg_${user.id}`;
+}
+__name(userIdFor3, "userIdFor");
+function toOrder(row) {
+  return {
+    id: row.id,
+    userId: row.user_id,
+    items: [
+      {
+        productId: row.product_id,
+        title: row.product_title,
+        kind: row.kind === "vpn" ? "vpn" : "account",
+        quantity: Number(row.quantity ?? 1),
+        unitPrice: Number(row.total)
+      }
+    ],
+    subtotal: Number(row.subtotal),
+    discount: Number(row.discount),
+    total: Number(row.total),
+    currency: "IRT",
+    status: row.status,
+    kind: row.kind === "vpn" ? "vpn" : "account",
+    paymentMethod: row.payment_method === "card" ? "card" : "wallet",
+    deliveryNote: row.delivery_note ?? void 0,
+    createdAt: row.created_at,
+    updatedAt: row.created_at
+  };
+}
+__name(toOrder, "toOrder");
+async function onRequestGet16(context) {
+  const auth = await authenticate2(context.request, context.env);
+  if (!auth.ok) return failure8(auth.status, auth.code, auth.message);
+  const db = context.env.DB;
+  if (!db) return failure8(503, "DB_NOT_CONFIGURED", "\u067E\u0627\u06CC\u06AF\u0627\u0647 \u062F\u0627\u062F\u0647 \u0633\u0641\u0627\u0631\u0634\u200C\u0647\u0627 \u062F\u0631 \u0633\u0631\u0648\u0631 \u062A\u0646\u0638\u06CC\u0645 \u0646\u0634\u062F\u0647 \u0627\u0633\u062A.");
+  let rows;
+  try {
+    const result = await db.prepare(
+      `SELECT id, user_id, product_id, product_title, kind, quantity, subtotal, discount,
+                total, currency, status, payment_method, delivery_note, created_at
+         FROM orders
+         WHERE user_id = ?
+         ORDER BY created_at DESC
+         LIMIT ?`
+    ).bind(userIdFor3(auth.user), ORDER_LIMIT2).all();
+    rows = result.results ?? [];
+  } catch {
+    return failure8(503, "DB_UNAVAILABLE", "\u062E\u0648\u0627\u0646\u062F\u0646 \u0633\u0641\u0627\u0631\u0634\u200C\u0647\u0627 \u0627\u0632 \u067E\u0627\u06CC\u06AF\u0627\u0647 \u062F\u0627\u062F\u0647 \u0627\u0646\u062C\u0627\u0645 \u0646\u0634\u062F.");
+  }
+  return jsonResponse7({
+    success: true,
+    data: rows.map(toOrder),
+    meta: { count: rows.length, limit: ORDER_LIMIT2 }
+  });
+}
+__name(onRequestGet16, "onRequestGet");
 
 // ../src/lib/format.ts
 var PERSIAN_DIGITS = ["\u06F0", "\u06F1", "\u06F2", "\u06F3", "\u06F4", "\u06F5", "\u06F6", "\u06F7", "\u06F8", "\u06F9"];
@@ -1331,6 +3148,10 @@ var CATEGORY_TITLES = {
   ai: "\u0627\u0634\u062A\u0631\u0627\u06A9 \u0647\u0648\u0634 \u0645\u0635\u0646\u0648\u0639\u06CC",
   gaming: "\u0645\u062D\u0635\u0648\u0644 \u06AF\u06CC\u0645\u06CC\u0646\u06AF",
   design: "\u0627\u0634\u062A\u0631\u0627\u06A9 \u0637\u0631\u0627\u062D\u06CC",
+  os: "\u0633\u06CC\u0633\u062A\u0645\u200C\u0639\u0627\u0645\u0644",
+  office: "\u0627\u0628\u0632\u0627\u0631 \u0628\u0647\u0631\u0647\u200C\u0648\u0631\u06CC",
+  security: "\u0627\u0628\u0632\u0627\u0631 \u0627\u0645\u0646\u06CC\u062A\u06CC",
+  dev: "\u0627\u0628\u0632\u0627\u0631 \u062A\u0648\u0633\u0639\u0647",
   social: "\u0627\u0634\u062A\u0631\u0627\u06A9 \u0634\u0628\u06A9\u0647 \u0627\u062C\u062A\u0645\u0627\u0639\u06CC",
   other: "\u0645\u062D\u0635\u0648\u0644 \u062F\u06CC\u062C\u06CC\u062A\u0627\u0644"
 };
@@ -1339,6 +3160,10 @@ var CATEGORY_DESCRIPTIONS = {
   ai: "\u0627\u0634\u062A\u0631\u0627\u06A9 \u067E\u0631\u0645\u06CC\u0648\u0645 \u0647\u0648\u0634 \u0645\u0635\u0646\u0648\u0639\u06CC \u0628\u0631\u0627\u06CC \u062A\u0648\u0644\u06CC\u062F \u0645\u062A\u0646 \u0648 \u06A9\u062F\u060C \u062A\u062D\u0644\u06CC\u0644 \u062F\u0627\u062F\u0647 \u0648 \u0627\u0641\u0632\u0627\u06CC\u0634 \u0633\u0631\u0639\u062A \u06A9\u0627\u0631\u061B \u0641\u0639\u0627\u0644\u200C\u0633\u0627\u0632\u06CC \u0633\u0631\u06CC\u0639 \u0631\u0648\u06CC \u062D\u0633\u0627\u0628 \u0634\u062E\u0635\u06CC.",
   gaming: "\u0645\u062D\u0635\u0648\u0644 \u06AF\u06CC\u0645\u06CC\u0646\u06AF \u0627\u0648\u0631\u062C\u06CC\u0646\u0627\u0644 \u0628\u0631\u0627\u06CC \u062E\u0631\u06CC\u062F \u0628\u0627\u0632\u06CC\u060C \u0627\u0639\u062A\u0628\u0627\u0631 \u062F\u0631\u0648\u0646\u200C\u0628\u0627\u0632\u06CC \u0648 \u0627\u0634\u062A\u0631\u0627\u06A9 \u0622\u0646\u0644\u0627\u06CC\u0646\u061B \u062A\u062D\u0648\u06CC\u0644 \u0641\u0648\u0631\u06CC \u0628\u0627 \u0636\u0645\u0627\u0646\u062A \u0627\u0635\u0627\u0644\u062A.",
   design: "\u0646\u0631\u0645\u200C\u0627\u0641\u0632\u0627\u0631 \u0642\u062F\u0631\u062A\u0645\u0646\u062F \u0637\u0631\u0627\u062D\u06CC \u0648 \u06AF\u0631\u0627\u0641\u06CC\u06A9 \u0628\u0631\u0627\u06CC \u0633\u0627\u062E\u062A \u062A\u0635\u0648\u06CC\u0631\u060C \u0648\u06CC\u062F\u06CC\u0648 \u0648 \u0631\u0627\u0628\u0637 \u06A9\u0627\u0631\u0628\u0631\u06CC\u061B \u062F\u0633\u062A\u0631\u0633\u06CC \u06A9\u0627\u0645\u0644 \u0628\u0627 \u062A\u062D\u0648\u06CC\u0644 \u0641\u0648\u0631\u06CC.",
+  os: "\u0633\u06CC\u0633\u062A\u0645\u200C\u0639\u0627\u0645\u0644 \u0648 \u0627\u0628\u0632\u0627\u0631\u0647\u0627\u06CC \u0645\u062F\u06CC\u0631\u06CC\u062A \u062F\u0633\u062A\u06AF\u0627\u0647 \u0628\u0627 \u062A\u062D\u0648\u06CC\u0644 \u0633\u0631\u06CC\u0639.",
+  office: "\u0627\u0628\u0632\u0627\u0631\u0647\u0627\u06CC \u0627\u062F\u0627\u0631\u06CC \u0648 \u0628\u0647\u0631\u0647\u200C\u0648\u0631\u06CC \u0628\u0631\u0627\u06CC \u06A9\u0627\u0631 \u0648 \u06CC\u0627\u062F\u06AF\u06CC\u0631\u06CC.",
+  security: "\u0627\u0628\u0632\u0627\u0631 \u0627\u0645\u0646\u06CC\u062A \u0648 \u062D\u0641\u0638 \u062D\u0631\u06CC\u0645 \u062E\u0635\u0648\u0635\u06CC \u0628\u0627 \u062A\u062D\u0648\u06CC\u0644 \u0633\u0631\u06CC\u0639.",
+  dev: "\u0627\u0628\u0632\u0627\u0631 \u062A\u0648\u0633\u0639\u0647 \u0646\u0631\u0645\u200C\u0627\u0641\u0632\u0627\u0631 \u0648 \u0645\u062F\u06CC\u0631\u06CC\u062A \u067E\u0631\u0648\u0698\u0647.",
   social: "\u0627\u0634\u062A\u0631\u0627\u06A9 \u0634\u0628\u06A9\u0647 \u0627\u062C\u062A\u0645\u0627\u0639\u06CC \u0628\u0627 \u0641\u0639\u0627\u0644\u200C\u0633\u0627\u0632\u06CC \u0641\u0648\u0631\u06CC \u0631\u0648\u06CC \u062D\u0633\u0627\u0628 \u0634\u062E\u0635\u06CC \u0648 \u0627\u0645\u06A9\u0627\u0646\u0627\u062A \u0648\u06CC\u0698\u0647 \u0645\u0627\u0646\u0646\u062F \u062A\u06CC\u06A9 \u0622\u0628\u06CC \u0648 \u0627\u0628\u0632\u0627\u0631\u0647\u0627\u06CC \u062D\u0631\u0641\u0647\u200C\u0627\u06CC.",
   other: "\u0645\u062D\u0635\u0648\u0644 \u062F\u06CC\u062C\u06CC\u062A\u0627\u0644 \u0627\u0648\u0631\u062C\u06CC\u0646\u0627\u0644 \u0628\u0627 \u0644\u0627\u06CC\u0633\u0646\u0633 \u0645\u0639\u062A\u0628\u0631\u060C \u062A\u062D\u0648\u06CC\u0644 \u0641\u0648\u0631\u06CC \u0648 \u067E\u0634\u062A\u06CC\u0628\u0627\u0646\u06CC \u06A9\u0627\u0645\u0644\u061B \u0645\u0646\u0627\u0633\u0628 \u0627\u0633\u062A\u0641\u0627\u062F\u0647 \u0634\u062E\u0635\u06CC \u0648 \u062D\u0631\u0641\u0647\u200C\u0627\u06CC."
 };
@@ -1347,6 +3172,10 @@ var CATEGORY_SUBTITLES = {
   ai: "\u062F\u0633\u062A\u0631\u0633\u06CC \u062D\u0631\u0641\u0647\u200C\u0627\u06CC \u0628\u0647 \u0647\u0648\u0634 \u0645\u0635\u0646\u0648\u0639\u06CC",
   gaming: "\u0645\u062D\u0635\u0648\u0644 \u0627\u0648\u0631\u062C\u06CC\u0646\u0627\u0644 \u0628\u0627 \u062A\u062D\u0648\u06CC\u0644 \u0641\u0648\u0631\u06CC",
   design: "\u0627\u0628\u0632\u0627\u0631 \u062D\u0631\u0641\u0647\u200C\u0627\u06CC \u0637\u0631\u0627\u062D\u06CC \u0648 \u062E\u0644\u0627\u0642\u06CC\u062A",
+  os: "\u0633\u06CC\u0633\u062A\u0645\u200C\u0639\u0627\u0645\u0644 \u0648 \u0627\u0628\u0632\u0627\u0631\u0647\u0627\u06CC \u0631\u0627\u06CC\u0627\u0646\u0647",
+  office: "\u0627\u0628\u0632\u0627\u0631 \u0627\u062F\u0627\u0631\u06CC \u0648 \u0628\u0647\u0631\u0647\u200C\u0648\u0631\u06CC",
+  security: "\u0627\u0645\u0646\u06CC\u062A \u0648 \u062D\u0631\u06CC\u0645 \u062E\u0635\u0648\u0635\u06CC",
+  dev: "\u0627\u0628\u0632\u0627\u0631 \u062A\u0648\u0633\u0639\u0647 \u0648 \u0628\u0631\u0646\u0627\u0645\u0647\u200C\u0646\u0648\u06CC\u0633\u06CC",
   social: "\u0627\u0631\u062A\u0642\u0627\u06CC \u062D\u0633\u0627\u0628 \u0628\u0627 \u0641\u0639\u0627\u0644\u200C\u0633\u0627\u0632\u06CC \u0641\u0648\u0631\u06CC",
   other: "\u0645\u062D\u0635\u0648\u0644 \u062F\u06CC\u062C\u06CC\u062A\u0627\u0644 \u0628\u0627 \u062A\u062D\u0648\u06CC\u0644 \u0641\u0648\u0631\u06CC"
 };
@@ -1355,6 +3184,10 @@ var CATEGORY_FEATURES = {
   ai: ["\u062F\u0633\u062A\u0631\u0633\u06CC \u0627\u0648\u0644\u0648\u06CC\u062A\u200C\u062F\u0627\u0631", "\u0641\u0639\u0627\u0644\u200C\u0633\u0627\u0632\u06CC \u0633\u0631\u06CC\u0639", "\u067E\u0634\u062A\u06CC\u0628\u0627\u0646\u06CC \u06A9\u0627\u0645\u0644"],
   gaming: ["\u06A9\u062F \u0627\u0648\u0631\u062C\u06CC\u0646\u0627\u0644", "\u062A\u062D\u0648\u06CC\u0644 \u0641\u0648\u0631\u06CC", "\u0636\u0645\u0627\u0646\u062A \u0627\u0635\u0627\u0644\u062A"],
   design: ["\u062F\u0633\u062A\u0631\u0633\u06CC \u06A9\u0627\u0645\u0644", "\u062A\u062D\u0648\u06CC\u0644 \u0641\u0648\u0631\u06CC", "\u067E\u0634\u062A\u06CC\u0628\u0627\u0646\u06CC \u0641\u0646\u06CC"],
+  os: ["\u062A\u062D\u0648\u06CC\u0644 \u0641\u0648\u0631\u06CC", "\u067E\u0634\u062A\u06CC\u0628\u0627\u0646\u06CC \u06A9\u0627\u0645\u0644"],
+  office: ["\u062A\u062D\u0648\u06CC\u0644 \u0641\u0648\u0631\u06CC", "\u067E\u0634\u062A\u06CC\u0628\u0627\u0646\u06CC \u06A9\u0627\u0645\u0644"],
+  security: ["\u062A\u062D\u0648\u06CC\u0644 \u0641\u0648\u0631\u06CC", "\u067E\u0634\u062A\u06CC\u0628\u0627\u0646\u06CC \u06A9\u0627\u0645\u0644"],
+  dev: ["\u062A\u062D\u0648\u06CC\u0644 \u0641\u0648\u0631\u06CC", "\u067E\u0634\u062A\u06CC\u0628\u0627\u0646\u06CC \u06A9\u0627\u0645\u0644"],
   social: ["\u0641\u0639\u0627\u0644\u200C\u0633\u0627\u0632\u06CC \u0641\u0648\u0631\u06CC", "\u062D\u0633\u0627\u0628 \u0634\u062E\u0635\u06CC", "\u067E\u0634\u062A\u06CC\u0628\u0627\u0646\u06CC \u06A9\u0627\u0645\u0644"],
   other: ["\u062A\u062D\u0648\u06CC\u0644 \u0641\u0648\u0631\u06CC", "\u0636\u0645\u0627\u0646\u062A \u0627\u0635\u0627\u0644\u062A", "\u067E\u0634\u062A\u06CC\u0628\u0627\u0646\u06CC \u06A9\u0627\u0645\u0644"]
 };
@@ -1363,6 +3196,10 @@ var CATEGORY_STYLE = {
   ai: { emoji: "\u{1F916}", gradient: "from-violet-500 via-purple-500 to-indigo-500" },
   gaming: { emoji: "\u{1F3AE}", gradient: "from-sky-500 via-blue-500 to-indigo-500" },
   design: { emoji: "\u{1F3A8}", gradient: "from-fuchsia-500 via-pink-500 to-rose-500" },
+  os: { emoji: "\u{1F4BB}", gradient: "from-sky-500 to-blue-700" },
+  office: { emoji: "\u{1F4CB}", gradient: "from-orange-500 to-amber-600" },
+  security: { emoji: "\u{1F6E1}\uFE0F", gradient: "from-emerald-500 to-teal-700" },
+  dev: { emoji: "\u2328\uFE0F", gradient: "from-indigo-500 to-slate-700" },
   social: { emoji: "\u2708\uFE0F", gradient: "from-sky-400 via-cyan-400 to-blue-500" },
   other: { emoji: "\u{1F4BB}", gradient: "from-brand-500 to-brand-700" }
 };
@@ -3308,40 +5145,6 @@ var BRAND_NAME_MATCHERS = BRANDS.map((brand) => ({
   brand,
   needle: brand.name.replace(/[\u200c\u200e\u200f\s]/g, "")
 })).sort((a, b) => b.needle.length - a.needle.length);
-var CATEGORY_KEYWORDS = [
-  {
-    tokens: ["ai", "gpt", "llm", "chatbot", "image generator", "text to video", "ai tools"],
-    category: "ai"
-  },
-  {
-    tokens: ["streaming", "music", "movie", "series", "tv", "anime", "podcast"],
-    category: "streaming"
-  },
-  {
-    tokens: ["in game", "v bucks", "top up", "game pass", "gaming"],
-    category: "gaming"
-  },
-  {
-    tokens: ["design", "template", "photo editor", "video editor", "mockup", "font"],
-    category: "design"
-  },
-  {
-    tokens: ["followers", "likes", "views", "verification", "social media", "booster"],
-    category: "social"
-  },
-  {
-    tokens: ["vpn", "antivirus", "security", "password", "key", "license"],
-    category: "other"
-  }
-];
-function resolveCategory(title, subtitle, provided) {
-  if (provided !== "other") return provided;
-  const text = normalize(`${title} ${subtitle ?? ""}`);
-  const brandCategory = matchBrand(text)?.category;
-  if (brandCategory) return brandCategory;
-  return CATEGORY_KEYWORDS.find((entry) => entry.tokens.some((token) => hasToken(text, token)))?.category ?? "other";
-}
-__name(resolveCategory, "resolveCategory");
 var TIER_RULES = [
   { tokens: ["ultimate"], label: "\u0627\u0648\u0644\u062A\u06CC\u0645\u06CC\u062A" },
   { tokens: ["premium", "prem"], label: "\u067E\u0631\u06CC\u0645\u06CC\u0648\u0645" },
@@ -3756,12 +5559,14 @@ __name(resolveGradient, "resolveGradient");
 function localizeProviderProduct(product) {
   const text = normalize(`${product.title} ${product.subtitle ?? ""}`);
   const brand = matchBrand(text);
-  const category = resolveCategory(product.title, product.subtitle, product.category);
+  const providerTitle = product.providerTitle ?? product.title;
+  const category = product.customCategory ?? classifyProduct(providerTitle);
   const title = localizeTitle(product.title, category);
-  const description = localizeDescription(product.description, category, title, brand);
+  const description = product.faDescription ?? localizeDescription(product.description, category, title, brand);
   const rawDescription = product.description?.trim();
   return {
     ...product,
+    providerTitle,
     category,
     title,
     subtitle: localizeSubtitle(product.subtitle, category),
@@ -3796,24 +5601,16 @@ var ProductsError = class extends Error {
     this.code = code;
   }
 };
-var PRODUCT_CATEGORIES = [
-  "streaming",
-  "ai",
-  "gaming",
-  "design",
-  "social",
-  "other"
-];
-var RESPONSE_HEADERS3 = {
+var RESPONSE_HEADERS9 = {
   "content-type": "application/json; charset=utf-8",
   "cache-control": "no-store",
   "x-content-type-options": "nosniff"
 };
-function jsonResponse3(body, status = 200) {
-  return new Response(JSON.stringify(body), { status, headers: RESPONSE_HEADERS3 });
+function jsonResponse8(body, status = 200) {
+  return new Response(JSON.stringify(body), { status, headers: RESPONSE_HEADERS9 });
 }
-__name(jsonResponse3, "jsonResponse");
-function describeCause(value, depth = 0) {
+__name(jsonResponse8, "jsonResponse");
+function describeCause2(value, depth = 0) {
   if (value === void 0 || value === null) return void 0;
   if (typeof value === "string" || typeof value === "number" || typeof value === "boolean") {
     return value;
@@ -3823,7 +5620,7 @@ function describeCause(value, depth = 0) {
     const name = typeof record.name === "string" ? record.name : void 0;
     const message = typeof record.message === "string" ? record.message : void 0;
     if (name || message) {
-      const nested = depth < 3 ? describeCause(record.cause, depth + 1) : void 0;
+      const nested = depth < 3 ? describeCause2(record.cause, depth + 1) : void 0;
       return {
         ...name ? { name } : {},
         ...message ? { message } : {},
@@ -3839,15 +5636,15 @@ function describeCause(value, depth = 0) {
   }
   return String(value);
 }
-__name(describeCause, "describeCause");
+__name(describeCause2, "describeCause");
 function failureResponse(error) {
   const err = error instanceof Error ? error : new Error(typeof error === "string" ? error : String(error));
-  return jsonResponse3(
+  return jsonResponse8(
     {
       success: false,
       code: error instanceof ProductsError ? error.code : "PRODUCTS_UNEXPECTED",
       message: err.message,
-      error: { name: err.name, message: err.message, cause: describeCause(err.cause) ?? null }
+      error: { name: err.name, message: err.message, cause: describeCause2(err.cause) ?? null }
     },
     500
   );
@@ -3869,16 +5666,15 @@ function parseFeatures(raw) {
   }
 }
 __name(parseFeatures, "parseFeatures");
-function toCategory(raw) {
-  return PRODUCT_CATEGORIES.includes(raw) ? raw : "other";
-}
-__name(toCategory, "toCategory");
 function toProduct(row) {
-  return localizeProviderProduct({
+  const product = localizeProviderProduct({
     id: row.id,
     title: row.title,
+    providerTitle: row.provider_title ?? row.title,
     subtitle: row.subtitle ?? void 0,
-    category: toCategory(row.category),
+    category: row.custom_category ?? classifyProduct(row.provider_title ?? row.title),
+    customCategory: row.custom_category ?? void 0,
+    faDescription: row.fa_description ?? void 0,
     price: finiteNumber(row.price) ?? 0,
     oldPrice: finiteNumber(row.old_price),
     providerPrice: finiteNumber(row.provider_price),
@@ -3897,9 +5693,17 @@ function toProduct(row) {
     emoji: row.emoji ?? void 0,
     brandKey: row.brand_key ?? void 0
   });
+  return {
+    ...product,
+    category: row.custom_category ?? classifyProduct(row.provider_title ?? row.title),
+    description: row.fa_description ?? product.description,
+    ...row.custom_category !== null ? { customCategory: row.custom_category } : {},
+    ...row.fa_description !== null ? { faDescription: row.fa_description } : {},
+    ...row.override_product_id !== null ? { isFeatured: row.is_featured === 1, isBestseller: row.is_bestseller === 1 } : {}
+  };
 }
 __name(toProduct, "toProduct");
-async function onRequestGet6(context) {
+async function onRequestGet17(context) {
   try {
     const db = context.env.DB;
     if (!db) {
@@ -3910,8 +5714,16 @@ async function onRequestGet6(context) {
     }
     let rows;
     try {
-      const result = await db.prepare("SELECT * FROM products ORDER BY title COLLATE NOCASE").all();
-      rows = Array.isArray(result.results) ? result.results : [];
+      const result = await db.prepare(`SELECT products.*, product_overrides.product_id AS override_product_id,
+                         product_overrides.fa_description, product_overrides.custom_category,
+                         product_overrides.is_featured, product_overrides.is_bestseller
+                  FROM products
+                  LEFT JOIN product_overrides ON product_overrides.product_id = products.id
+                  ORDER BY products.title COLLATE NOCASE`).all();
+      if (result.success === false || !Array.isArray(result.results)) {
+        throw new Error("D1 did not return catalogue results");
+      }
+      rows = result.results;
     } catch (cause) {
       throw new ProductsError("PRODUCTS_READ_FAILED", "\u062E\u0648\u0627\u0646\u062F\u0646 \u06A9\u0627\u062A\u0627\u0644\u0648\u06AF \u0627\u0632 D1 \u0646\u0627\u0645\u0648\u0641\u0642 \u0628\u0648\u062F.", {
         cause
@@ -3934,7 +5746,7 @@ async function onRequestGet6(context) {
     } catch {
     }
     const products = rows.map(toProduct);
-    return jsonResponse3({
+    return jsonResponse8({
       success: true,
       data: products,
       meta: {
@@ -3948,25 +5760,25 @@ async function onRequestGet6(context) {
     return failureResponse(error);
   }
 }
-__name(onRequestGet6, "onRequestGet");
+__name(onRequestGet17, "onRequestGet");
 
 // api/purchase.ts
-var MAX_BODY_BYTES = 8192;
+var MAX_BODY_BYTES4 = 8192;
 var MAX_AMOUNT_TOMAN = 1e8;
 var INIT_DATA_MAX_AGE_SECONDS2 = 24 * 60 * 60;
-var RESPONSE_HEADERS4 = {
+var RESPONSE_HEADERS10 = {
   "content-type": "application/json; charset=utf-8",
   "cache-control": "no-store",
   "x-content-type-options": "nosniff"
 };
-function jsonResponse4(body, status = 200) {
-  return new Response(JSON.stringify(body), { status, headers: RESPONSE_HEADERS4 });
+function jsonResponse9(body, status = 200) {
+  return new Response(JSON.stringify(body), { status, headers: RESPONSE_HEADERS10 });
 }
-__name(jsonResponse4, "jsonResponse");
-function failure2(status, code, message, data) {
-  return jsonResponse4({ success: false, code, message, data }, status);
+__name(jsonResponse9, "jsonResponse");
+function failure9(status, code, message, data) {
+  return jsonResponse9({ success: false, code, message, data }, status);
 }
-__name(failure2, "failure");
+__name(failure9, "failure");
 function toHex3(buffer) {
   return Array.from(new Uint8Array(buffer)).map((byte) => byte.toString(16).padStart(2, "0")).join("");
 }
@@ -4018,7 +5830,7 @@ async function verifyInitData2(initData, botToken) {
   }
 }
 __name(verifyInitData2, "verifyInitData");
-async function authenticate(request, env) {
+async function authenticate3(request, env) {
   const botToken = env.TELEGRAM_BOT_TOKEN?.trim();
   const initData = request.headers.get("X-Telegram-Init-Data")?.trim();
   if (initData) {
@@ -4052,11 +5864,11 @@ async function authenticate(request, env) {
     message: "\u0628\u0631\u0627\u06CC \u062E\u0631\u06CC\u062F \u0628\u0627\u06CC\u062F \u0645\u06CC\u0646\u06CC\u200C\u0627\u067E \u0631\u0627 \u0627\u0632 \u062F\u0627\u062E\u0644 \u062A\u0644\u06AF\u0631\u0627\u0645 \u0628\u0627\u0632 \u06A9\u0646\u06CC\u062F."
   };
 }
-__name(authenticate, "authenticate");
-function userIdFor(user) {
+__name(authenticate3, "authenticate");
+function userIdFor4(user) {
   return `usr_tg_${user.id}`;
 }
-__name(userIdFor, "userIdFor");
+__name(userIdFor4, "userIdFor");
 async function ensureUser(db, user, now) {
   await db.prepare(
     `INSERT INTO users (id, telegram_id, username, first_name, last_name, balance, currency, created_at, updated_at)
@@ -4067,7 +5879,7 @@ async function ensureUser(db, user, now) {
          last_name = excluded.last_name,
          updated_at = excluded.updated_at`
   ).bind(
-    userIdFor(user),
+    userIdFor4(user),
     user.id,
     user.username ?? null,
     user.first_name ?? null,
@@ -4122,52 +5934,126 @@ function validateBody2(body) {
     if (!parsedCoupon) return { ok: false, message: "\u06A9\u062F \u062A\u062E\u0641\u06CC\u0641 \u0646\u0627\u0645\u0639\u062A\u0628\u0631 \u0627\u0633\u062A." };
     couponCode = parsedCoupon;
   }
-  return { ok: true, value: { productId, title, kind, subtotal, discount, total, couponCode } };
+  const paymentMethod = body.paymentMethod === "card" ? "card" : "wallet";
+  let receiptReference;
+  if (paymentMethod === "card") {
+    const reference = readString(body.receiptReference, 64);
+    if (!reference || reference.length < 4) {
+      return { ok: false, message: "\u0634\u0645\u0627\u0631\u0647 \u067E\u06CC\u06AF\u06CC\u0631\u06CC \u0648\u0627\u0631\u06CC\u0632 \u0631\u0627 \u06A9\u0627\u0645\u0644 \u0648\u0627\u0631\u062F \u06A9\u0646\u06CC\u062F." };
+    }
+    receiptReference = reference;
+  }
+  return {
+    ok: true,
+    value: { productId, title, kind, subtotal, discount, total, couponCode, paymentMethod, receiptReference }
+  };
 }
 __name(validateBody2, "validateBody");
-async function onRequestPost6(context) {
+async function onRequestPost15(context) {
   const { env } = context;
-  const auth = await authenticate(context.request, env);
-  if (!auth.ok) return failure2(auth.status, auth.code, auth.message);
+  const auth = await authenticate3(context.request, env);
+  if (!auth.ok) return failure9(auth.status, auth.code, auth.message);
   const db = env.DB;
   if (!db) {
-    return failure2(503, "DB_NOT_CONFIGURED", "\u067E\u0627\u06CC\u06AF\u0627\u0647 \u062F\u0627\u062F\u0647 \u0633\u0641\u0627\u0631\u0634\u200C\u0647\u0627 \u062F\u0631 \u0633\u0631\u0648\u0631 \u062A\u0646\u0638\u06CC\u0645 \u0646\u0634\u062F\u0647 \u0627\u0633\u062A.");
+    return failure9(503, "DB_NOT_CONFIGURED", "\u067E\u0627\u06CC\u06AF\u0627\u0647 \u062F\u0627\u062F\u0647 \u0633\u0641\u0627\u0631\u0634\u200C\u0647\u0627 \u062F\u0631 \u0633\u0631\u0648\u0631 \u062A\u0646\u0638\u06CC\u0645 \u0646\u0634\u062F\u0647 \u0627\u0633\u062A.");
   }
   let rawBody;
   try {
     rawBody = await context.request.text();
   } catch {
-    return failure2(400, "PURCHASE_BAD_REQUEST", "\u0628\u062F\u0646\u0647 \u062F\u0631\u062E\u0648\u0627\u0633\u062A \u0642\u0627\u0628\u0644 \u062E\u0648\u0627\u0646\u062F\u0646 \u0646\u0628\u0648\u062F.");
+    return failure9(400, "PURCHASE_BAD_REQUEST", "\u0628\u062F\u0646\u0647 \u062F\u0631\u062E\u0648\u0627\u0633\u062A \u0642\u0627\u0628\u0644 \u062E\u0648\u0627\u0646\u062F\u0646 \u0646\u0628\u0648\u062F.");
   }
-  if (rawBody.length > MAX_BODY_BYTES) {
-    return failure2(413, "PURCHASE_BAD_REQUEST", "\u062F\u0631\u062E\u0648\u0627\u0633\u062A \u062E\u0631\u06CC\u062F \u0628\u06CC\u0634 \u0627\u0632 \u062D\u062F \u0628\u0632\u0631\u06AF \u0627\u0633\u062A.");
+  if (rawBody.length > MAX_BODY_BYTES4) {
+    return failure9(413, "PURCHASE_BAD_REQUEST", "\u062F\u0631\u062E\u0648\u0627\u0633\u062A \u062E\u0631\u06CC\u062F \u0628\u06CC\u0634 \u0627\u0632 \u062D\u062F \u0628\u0632\u0631\u06AF \u0627\u0633\u062A.");
   }
   let body;
   try {
     const parsed = JSON.parse(rawBody);
     if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
-      return failure2(400, "PURCHASE_BAD_REQUEST", "\u0633\u0627\u062E\u062A\u0627\u0631 \u062F\u0631\u062E\u0648\u0627\u0633\u062A \u062E\u0631\u06CC\u062F \u0646\u0627\u0645\u0639\u062A\u0628\u0631 \u0627\u0633\u062A.");
+      return failure9(400, "PURCHASE_BAD_REQUEST", "\u0633\u0627\u062E\u062A\u0627\u0631 \u062F\u0631\u062E\u0648\u0627\u0633\u062A \u062E\u0631\u06CC\u062F \u0646\u0627\u0645\u0639\u062A\u0628\u0631 \u0627\u0633\u062A.");
     }
     body = parsed;
   } catch {
-    return failure2(400, "PURCHASE_BAD_REQUEST", "\u0633\u0627\u062E\u062A\u0627\u0631 \u062F\u0631\u062E\u0648\u0627\u0633\u062A \u062E\u0631\u06CC\u062F \u0646\u0627\u0645\u0639\u062A\u0628\u0631 \u0627\u0633\u062A.");
+    return failure9(400, "PURCHASE_BAD_REQUEST", "\u0633\u0627\u062E\u062A\u0627\u0631 \u062F\u0631\u062E\u0648\u0627\u0633\u062A \u062E\u0631\u06CC\u062F \u0646\u0627\u0645\u0639\u062A\u0628\u0631 \u0627\u0633\u062A.");
   }
   const validated = validateBody2(body);
-  if (!validated.ok) return failure2(400, "PURCHASE_VALIDATION", validated.message);
-  const { productId, title, kind, subtotal, discount, total, couponCode } = validated.value;
+  if (!validated.ok) return failure9(400, "PURCHASE_VALIDATION", validated.message);
+  const {
+    productId,
+    title,
+    kind,
+    subtotal,
+    discount,
+    total,
+    couponCode,
+    paymentMethod,
+    receiptReference
+  } = validated.value;
   const now = (/* @__PURE__ */ new Date()).toISOString();
-  const userId = userIdFor(auth.user);
+  const userId = userIdFor4(auth.user);
   try {
     await ensureUser(db, auth.user, now);
   } catch {
-    return failure2(503, "DB_UNAVAILABLE", "\u0627\u0631\u062A\u0628\u0627\u0637 \u0628\u0627 \u067E\u0627\u06CC\u06AF\u0627\u0647 \u062F\u0627\u062F\u0647 \u0628\u0631\u0642\u0631\u0627\u0631 \u0646\u0634\u062F. \u062F\u0648\u0628\u0627\u0631\u0647 \u062A\u0644\u0627\u0634 \u06A9\u0646\u06CC\u062F.");
+    return failure9(503, "DB_UNAVAILABLE", "\u0627\u0631\u062A\u0628\u0627\u0637 \u0628\u0627 \u067E\u0627\u06CC\u06AF\u0627\u0647 \u062F\u0627\u062F\u0647 \u0628\u0631\u0642\u0631\u0627\u0631 \u0646\u0634\u062F. \u062F\u0648\u0628\u0627\u0631\u0647 \u062A\u0644\u0627\u0634 \u06A9\u0646\u06CC\u062F.");
   }
   const balance = await readBalance(db, userId);
   if (balance === null) {
-    return failure2(500, "USER_NOT_FOUND", "\u062D\u0633\u0627\u0628 \u06A9\u06CC\u0641 \u067E\u0648\u0644 \u067E\u06CC\u062F\u0627 \u0646\u0634\u062F. \u062F\u0648\u0628\u0627\u0631\u0647 \u062A\u0644\u0627\u0634 \u06A9\u0646\u06CC\u062F.");
+    return failure9(500, "USER_NOT_FOUND", "\u062D\u0633\u0627\u0628 \u06A9\u06CC\u0641 \u067E\u0648\u0644 \u067E\u06CC\u062F\u0627 \u0646\u0634\u062F. \u062F\u0648\u0628\u0627\u0631\u0647 \u062A\u0644\u0627\u0634 \u06A9\u0646\u06CC\u062F.");
+  }
+  if (paymentMethod === "card") {
+    const orderId2 = `ord_${crypto.randomUUID()}`;
+    const receiptId = `rcp_${crypto.randomUUID()}`;
+    try {
+      await db.batch([
+        db.prepare(
+          `INSERT INTO orders
+               (id, user_id, product_id, product_title, kind, quantity, subtotal, discount, total, currency, coupon_code, status, payment_method, created_at)
+             VALUES (?, ?, ?, ?, ?, 1, ?, ?, ?, 'IRT', ?, 'pending', 'card', ?)`
+        ).bind(
+          orderId2,
+          userId,
+          productId,
+          title,
+          kind,
+          subtotal,
+          discount,
+          total,
+          couponCode ?? null,
+          now
+        ),
+        db.prepare(
+          `INSERT INTO payment_receipts
+               (id, user_id, telegram_id, purpose, order_id, amount, currency, reference, status, created_at)
+             VALUES (?, ?, ?, 'product_purchase', ?, ?, 'IRT', ?, 'PENDING', ?)`
+        ).bind(receiptId, userId, auth.user.id, orderId2, total, receiptReference ?? "", now)
+      ]);
+    } catch {
+      return failure9(500, "ORDER_WRITE_FAILED", "\u062B\u0628\u062A \u0633\u0641\u0627\u0631\u0634 \u06A9\u0627\u0631\u062A \u0628\u0647 \u06A9\u0627\u0631\u062A \u0627\u0646\u062C\u0627\u0645 \u0646\u0634\u062F. \u062F\u0648\u0628\u0627\u0631\u0647 \u062A\u0644\u0627\u0634 \u06A9\u0646\u06CC\u062F.");
+    }
+    return jsonResponse9({
+      success: true,
+      message: "\u0633\u0641\u0627\u0631\u0634 \u062B\u0628\u062A \u0634\u062F \u0648 \u067E\u0633 \u0627\u0632 \u062A\u0627\u06CC\u06CC\u062F \u0641\u06CC\u0634 \u0648\u0627\u0631\u06CC\u0632 \u062A\u0648\u0633\u0637 \u0627\u062F\u0645\u06CC\u0646 \u062A\u06A9\u0645\u06CC\u0644 \u0645\u06CC\u200C\u0634\u0648\u062F.",
+      data: {
+        order: {
+          id: orderId2,
+          status: "pending",
+          kind,
+          productId,
+          title,
+          subtotal,
+          discount,
+          total,
+          currency: "IRT",
+          paymentMethod: "card",
+          createdAt: now
+        },
+        balance,
+        receipt: { id: receiptId, status: "PENDING" }
+      }
+    });
   }
   if (balance < total) {
-    return failure2(402, "INSUFFICIENT_FUNDS", "\u0645\u0648\u062C\u0648\u062F\u06CC \u06A9\u06CC\u0641 \u067E\u0648\u0644 \u0628\u0631\u0627\u06CC \u0627\u06CC\u0646 \u062E\u0631\u06CC\u062F \u06A9\u0627\u0641\u06CC \u0646\u06CC\u0633\u062A.", {
+    return failure9(402, "INSUFFICIENT_FUNDS", "\u0645\u0648\u062C\u0648\u062F\u06CC \u06A9\u06CC\u0641 \u067E\u0648\u0644 \u0628\u0631\u0627\u06CC \u0627\u06CC\u0646 \u062E\u0631\u06CC\u062F \u06A9\u0627\u0641\u06CC \u0646\u06CC\u0633\u062A.", {
       balance,
       required: total
     });
@@ -4177,11 +6063,11 @@ async function onRequestPost6(context) {
     const debit = await db.prepare("UPDATE users SET balance = balance - ?, updated_at = ? WHERE id = ? AND balance >= ?").bind(total, now, userId, total).run();
     debitChanges = debit.meta?.changes ?? 0;
   } catch {
-    return failure2(503, "DB_UNAVAILABLE", "\u062B\u0628\u062A \u067E\u0631\u062F\u0627\u062E\u062A \u0627\u0646\u062C\u0627\u0645 \u0646\u0634\u062F. \u062F\u0648\u0628\u0627\u0631\u0647 \u062A\u0644\u0627\u0634 \u06A9\u0646\u06CC\u062F.");
+    return failure9(503, "DB_UNAVAILABLE", "\u062B\u0628\u062A \u067E\u0631\u062F\u0627\u062E\u062A \u0627\u0646\u062C\u0627\u0645 \u0646\u0634\u062F. \u062F\u0648\u0628\u0627\u0631\u0647 \u062A\u0644\u0627\u0634 \u06A9\u0646\u06CC\u062F.");
   }
   if (debitChanges !== 1) {
     const latest = await readBalance(db, userId);
-    return failure2(402, "INSUFFICIENT_FUNDS", "\u0645\u0648\u062C\u0648\u062F\u06CC \u06A9\u06CC\u0641 \u067E\u0648\u0644 \u0628\u0631\u0627\u06CC \u0627\u06CC\u0646 \u062E\u0631\u06CC\u062F \u06A9\u0627\u0641\u06CC \u0646\u06CC\u0633\u062A.", {
+    return failure9(402, "INSUFFICIENT_FUNDS", "\u0645\u0648\u062C\u0648\u062F\u06CC \u06A9\u06CC\u0641 \u067E\u0648\u0644 \u0628\u0631\u0627\u06CC \u0627\u06CC\u0646 \u062E\u0631\u06CC\u062F \u06A9\u0627\u0641\u06CC \u0646\u06CC\u0633\u062A.", {
       balance: latest ?? 0,
       required: total
     });
@@ -4193,8 +6079,8 @@ async function onRequestPost6(context) {
     await db.batch([
       db.prepare(
         `INSERT INTO orders
-             (id, user_id, product_id, product_title, kind, quantity, subtotal, discount, total, currency, coupon_code, status, created_at)
-           VALUES (?, ?, ?, ?, ?, 1, ?, ?, ?, 'IRT', ?, 'paid', ?)`
+             (id, user_id, product_id, product_title, kind, quantity, subtotal, discount, total, currency, coupon_code, status, payment_method, created_at)
+           VALUES (?, ?, ?, ?, ?, 1, ?, ?, ?, 'IRT', ?, 'paid', 'wallet', ?)`
       ).bind(
         orderId,
         userId,
@@ -4226,9 +6112,9 @@ async function onRequestPost6(context) {
       await db.prepare("UPDATE users SET balance = balance + ?, updated_at = ? WHERE id = ?").bind(total, (/* @__PURE__ */ new Date()).toISOString(), userId).run();
     } catch {
     }
-    return failure2(500, "ORDER_WRITE_FAILED", "\u062B\u0628\u062A \u0633\u0641\u0627\u0631\u0634 \u0627\u0646\u062C\u0627\u0645 \u0646\u0634\u062F\u061B \u0645\u0628\u0644\u063A \u0628\u0647 \u06A9\u06CC\u0641 \u067E\u0648\u0644 \u0628\u0627\u0632\u06AF\u0631\u062F\u0627\u0646\u062F\u0647 \u0634\u062F.");
+    return failure9(500, "ORDER_WRITE_FAILED", "\u062B\u0628\u062A \u0633\u0641\u0627\u0631\u0634 \u0627\u0646\u062C\u0627\u0645 \u0646\u0634\u062F\u061B \u0645\u0628\u0644\u063A \u0628\u0647 \u06A9\u06CC\u0641 \u067E\u0648\u0644 \u0628\u0627\u0632\u06AF\u0631\u062F\u0627\u0646\u062F\u0647 \u0634\u062F.");
   }
-  return jsonResponse4({
+  return jsonResponse9({
     success: true,
     data: {
       order: {
@@ -4247,12 +6133,12 @@ async function onRequestPost6(context) {
     }
   });
 }
-__name(onRequestPost6, "onRequestPost");
+__name(onRequestPost15, "onRequestPost");
 
 // api/sync.ts
 var UPSTREAM_TIMEOUT_MS2 = 15e3;
 var PRODUCTS_PER_BATCH = 50;
-var RESPONSE_HEADERS5 = {
+var RESPONSE_HEADERS11 = {
   "content-type": "application/json; charset=utf-8",
   "cache-control": "no-store",
   "x-content-type-options": "nosniff"
@@ -4262,9 +6148,9 @@ var UPSERT_SQL = `
     id, title, subtitle, category, price, old_price,
     provider_price, provider_old_price, provider_currency, currency,
     stock, rating, review_count, badge, delivery_time, description,
-    features, gradient, emoji, brand_key, provider_description,
+    features, gradient, emoji, brand_key, provider_description, provider_title,
     synced_at, created_at, updated_at
-  ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   ON CONFLICT(id) DO UPDATE SET
     title = excluded.title,
     subtitle = excluded.subtitle,
@@ -4286,6 +6172,7 @@ var UPSERT_SQL = `
     emoji = excluded.emoji,
     brand_key = excluded.brand_key,
     provider_description = excluded.provider_description,
+    provider_title = excluded.provider_title,
     synced_at = excluded.synced_at,
     updated_at = excluded.updated_at
 `;
@@ -4300,11 +6187,11 @@ var SyncError = class extends Error {
     this.code = code;
   }
 };
-function jsonResponse5(body, status = 200) {
-  return new Response(JSON.stringify(body), { status, headers: RESPONSE_HEADERS5 });
+function jsonResponse10(body, status = 200) {
+  return new Response(JSON.stringify(body), { status, headers: RESPONSE_HEADERS11 });
 }
-__name(jsonResponse5, "jsonResponse");
-function describeCause2(value, depth = 0) {
+__name(jsonResponse10, "jsonResponse");
+function describeCause3(value, depth = 0) {
   if (value === void 0 || value === null) return void 0;
   if (typeof value === "string" || typeof value === "number" || typeof value === "boolean") {
     return value;
@@ -4315,7 +6202,7 @@ function describeCause2(value, depth = 0) {
     const message = typeof record.message === "string" ? record.message : void 0;
     const code = typeof record.code === "string" ? record.code : void 0;
     if (name || message || code) {
-      const nested = depth < 3 ? describeCause2(record.cause, depth + 1) : void 0;
+      const nested = depth < 3 ? describeCause3(record.cause, depth + 1) : void 0;
       return {
         ...name ? { name } : {},
         ...message ? { message } : {},
@@ -4332,11 +6219,11 @@ function describeCause2(value, depth = 0) {
   }
   return String(value);
 }
-__name(describeCause2, "describeCause");
+__name(describeCause3, "describeCause");
 function failureResponse2(error) {
   const err = error instanceof Error ? error : new Error(typeof error === "string" ? error : String(error));
   const code = error instanceof SyncError ? error.code : "SYNC_UNEXPECTED";
-  return jsonResponse5(
+  return jsonResponse10(
     {
       success: false,
       code,
@@ -4344,7 +6231,7 @@ function failureResponse2(error) {
       error: {
         name: err.name,
         message: err.message,
-        cause: describeCause2(err.cause) ?? null
+        cause: describeCause3(err.cause) ?? null
       }
     },
     500
@@ -4448,6 +6335,7 @@ function toBindings(product, syncedAt) {
     product.emoji ?? null,
     product.brandKey ?? null,
     product.providerDescription ?? null,
+    product.providerTitle ?? product.title,
     syncedAt,
     syncedAt,
     syncedAt
@@ -4486,7 +6374,7 @@ async function writeSyncMeta(db, usdtRate, syncedAt) {
   }
 }
 __name(writeSyncMeta, "writeSyncMeta");
-async function onRequestPost7(context) {
+async function onRequestPost16(context) {
   try {
     const apiKey = context.env.ACCOUNTS_PROVIDER_API_KEY?.trim();
     if (!apiKey) {
@@ -4533,7 +6421,7 @@ async function onRequestPost7(context) {
     const syncedAt = (/* @__PURE__ */ new Date()).toISOString();
     const batches = await writeProducts(db, products, syncedAt);
     await writeSyncMeta(db, usdtRate, syncedAt);
-    return jsonResponse5({
+    return jsonResponse10({
       success: true,
       data: {
         products,
@@ -4554,24 +6442,24 @@ async function onRequestPost7(context) {
     return failureResponse2(error);
   }
 }
-__name(onRequestPost7, "onRequestPost");
+__name(onRequestPost16, "onRequestPost");
 
 // api/wallet.ts
 var INIT_DATA_MAX_AGE_SECONDS3 = 24 * 60 * 60;
 var TRANSACTION_LIMIT = 20;
-var RESPONSE_HEADERS6 = {
+var RESPONSE_HEADERS12 = {
   "content-type": "application/json; charset=utf-8",
   "cache-control": "no-store",
   "x-content-type-options": "nosniff"
 };
-function jsonResponse6(body, status = 200) {
-  return new Response(JSON.stringify(body), { status, headers: RESPONSE_HEADERS6 });
+function jsonResponse11(body, status = 200) {
+  return new Response(JSON.stringify(body), { status, headers: RESPONSE_HEADERS12 });
 }
-__name(jsonResponse6, "jsonResponse");
-function failure3(status, code, message) {
-  return jsonResponse6({ success: false, code, message }, status);
+__name(jsonResponse11, "jsonResponse");
+function failure10(status, code, message) {
+  return jsonResponse11({ success: false, code, message }, status);
 }
-__name(failure3, "failure");
+__name(failure10, "failure");
 function toHex4(buffer) {
   return Array.from(new Uint8Array(buffer)).map((byte) => byte.toString(16).padStart(2, "0")).join("");
 }
@@ -4623,7 +6511,7 @@ async function verifyInitData3(initData, botToken) {
   }
 }
 __name(verifyInitData3, "verifyInitData");
-async function authenticate2(request, env) {
+async function authenticate4(request, env) {
   const botToken = env.TELEGRAM_BOT_TOKEN?.trim();
   const initData = request.headers.get("X-Telegram-Init-Data")?.trim();
   if (initData) {
@@ -4657,11 +6545,11 @@ async function authenticate2(request, env) {
     message: "\u0628\u0631\u0627\u06CC \u062F\u06CC\u062F\u0646 \u06A9\u06CC\u0641 \u067E\u0648\u0644 \u0628\u0627\u06CC\u062F \u0645\u06CC\u0646\u06CC\u200C\u0627\u067E \u0631\u0627 \u0627\u0632 \u062F\u0627\u062E\u0644 \u062A\u0644\u06AF\u0631\u0627\u0645 \u0628\u0627\u0632 \u06A9\u0646\u06CC\u062F."
   };
 }
-__name(authenticate2, "authenticate");
-function userIdFor2(user) {
+__name(authenticate4, "authenticate");
+function userIdFor5(user) {
   return `usr_tg_${user.id}`;
 }
-__name(userIdFor2, "userIdFor");
+__name(userIdFor5, "userIdFor");
 async function ensureUser2(db, user, now) {
   await db.prepare(
     `INSERT INTO users (id, telegram_id, username, first_name, last_name, balance, currency, created_at, updated_at)
@@ -4672,7 +6560,7 @@ async function ensureUser2(db, user, now) {
          last_name = excluded.last_name,
          updated_at = excluded.updated_at`
   ).bind(
-    userIdFor2(user),
+    userIdFor5(user),
     user.id,
     user.username ?? null,
     user.first_name ?? null,
@@ -4682,30 +6570,40 @@ async function ensureUser2(db, user, now) {
   ).run();
 }
 __name(ensureUser2, "ensureUser");
-async function onRequestGet7(context) {
-  const auth = await authenticate2(context.request, context.env);
-  if (!auth.ok) return failure3(auth.status, auth.code, auth.message);
+async function onRequestGet18(context) {
+  const auth = await authenticate4(context.request, context.env);
+  if (!auth.ok) return failure10(auth.status, auth.code, auth.message);
   const db = context.env.DB;
-  if (!db) return failure3(503, "DB_NOT_CONFIGURED", "\u067E\u0627\u06CC\u06AF\u0627\u0647 \u062F\u0627\u062F\u0647 \u06A9\u06CC\u0641 \u067E\u0648\u0644 \u062F\u0631 \u0633\u0631\u0648\u0631 \u062A\u0646\u0638\u06CC\u0645 \u0646\u0634\u062F\u0647 \u0627\u0633\u062A.");
+  if (!db) return failure10(503, "DB_NOT_CONFIGURED", "\u067E\u0627\u06CC\u06AF\u0627\u0647 \u062F\u0627\u062F\u0647 \u06A9\u06CC\u0641 \u067E\u0648\u0644 \u062F\u0631 \u0633\u0631\u0648\u0631 \u062A\u0646\u0638\u06CC\u0645 \u0646\u0634\u062F\u0647 \u0627\u0633\u062A.");
   const now = (/* @__PURE__ */ new Date()).toISOString();
-  const userId = userIdFor2(auth.user);
+  const userId = userIdFor5(auth.user);
   try {
     await ensureUser2(db, auth.user, now);
   } catch {
-    return failure3(503, "DB_UNAVAILABLE", "\u0627\u0631\u062A\u0628\u0627\u0637 \u0628\u0627 \u067E\u0627\u06CC\u06AF\u0627\u0647 \u062F\u0627\u062F\u0647 \u0628\u0631\u0642\u0631\u0627\u0631 \u0646\u0634\u062F. \u062F\u0648\u0628\u0627\u0631\u0647 \u062A\u0644\u0627\u0634 \u06A9\u0646\u06CC\u062F.");
+    return failure10(503, "DB_UNAVAILABLE", "\u0627\u0631\u062A\u0628\u0627\u0637 \u0628\u0627 \u067E\u0627\u06CC\u06AF\u0627\u0647 \u062F\u0627\u062F\u0647 \u0628\u0631\u0642\u0631\u0627\u0631 \u0646\u0634\u062F. \u062F\u0648\u0628\u0627\u0631\u0647 \u062A\u0644\u0627\u0634 \u06A9\u0646\u06CC\u062F.");
   }
   let balance;
   let lifetimeSpent;
+  let pendingReceipts = 0;
   let rows;
   try {
     const user = await db.prepare("SELECT balance FROM users WHERE id = ?").bind(userId).first();
-    if (!user) return failure3(500, "USER_NOT_FOUND", "\u062D\u0633\u0627\u0628 \u06A9\u06CC\u0641 \u067E\u0648\u0644 \u067E\u06CC\u062F\u0627 \u0646\u0634\u062F. \u062F\u0648\u0628\u0627\u0631\u0647 \u062A\u0644\u0627\u0634 \u06A9\u0646\u06CC\u062F.");
+    if (!user) return failure10(500, "USER_NOT_FOUND", "\u062D\u0633\u0627\u0628 \u06A9\u06CC\u0641 \u067E\u0648\u0644 \u067E\u06CC\u062F\u0627 \u0646\u0634\u062F. \u062F\u0648\u0628\u0627\u0631\u0647 \u062A\u0644\u0627\u0634 \u06A9\u0646\u06CC\u062F.");
     balance = Number(user.balance);
     const spent = await db.prepare(
       `SELECT COALESCE(SUM(-amount), 0) AS spent FROM wallet_transactions
          WHERE user_id = ? AND type = 'purchase'`
     ).bind(userId).first();
     lifetimeSpent = Number(spent?.spent ?? 0);
+    try {
+      const pendingRow = await db.prepare(
+        `SELECT COALESCE(SUM(amount), 0) AS pending FROM payment_receipts
+           WHERE user_id = ? AND purpose = 'wallet_topup' AND status = 'PENDING'`
+      ).bind(userId).first();
+      pendingReceipts = Number(pendingRow?.pending ?? 0);
+    } catch {
+      pendingReceipts = 0;
+    }
     const result = await db.prepare(
       `SELECT id, type, amount, currency, description, reference, created_at
          FROM wallet_transactions
@@ -4715,14 +6613,14 @@ async function onRequestGet7(context) {
     ).bind(userId, TRANSACTION_LIMIT).all();
     rows = result.results ?? [];
   } catch {
-    return failure3(503, "DB_UNAVAILABLE", "\u062E\u0648\u0627\u0646\u062F\u0646 \u06A9\u06CC\u0641 \u067E\u0648\u0644 \u0627\u0646\u062C\u0627\u0645 \u0646\u0634\u062F. \u062F\u0648\u0628\u0627\u0631\u0647 \u062A\u0644\u0627\u0634 \u06A9\u0646\u06CC\u062F.");
+    return failure10(503, "DB_UNAVAILABLE", "\u062E\u0648\u0627\u0646\u062F\u0646 \u06A9\u06CC\u0641 \u067E\u0648\u0644 \u0627\u0646\u062C\u0627\u0645 \u0646\u0634\u062F. \u062F\u0648\u0628\u0627\u0631\u0647 \u062A\u0644\u0627\u0634 \u06A9\u0646\u06CC\u062F.");
   }
-  return jsonResponse6({
+  return jsonResponse11({
     success: true,
     data: {
       balance,
       currency: "IRT",
-      pending: 0,
+      pending: pendingReceipts,
       lifetimeSpent,
       transactions: rows.map((row) => ({
         id: row.id,
@@ -4737,107 +6635,247 @@ async function onRequestGet7(context) {
     }
   });
 }
-__name(onRequestGet7, "onRequestGet");
+__name(onRequestGet18, "onRequestGet");
 
-// ../.wrangler/tmp/pages-p0ILy3/functionsRoutes-0.5493551655899598.mjs
+// ../.wrangler/tmp/pages-FjwA9A/functionsRoutes-0.7856649943701718.mjs
 var routes = [
+  {
+    routePath: "/api/admin/static-ip/nodes/action",
+    mountPath: "/api/admin/static-ip/nodes",
+    method: "POST",
+    middlewares: [],
+    modules: [onRequestPost]
+  },
+  {
+    routePath: "/api/admin/static-ip/plans/action",
+    mountPath: "/api/admin/static-ip/plans",
+    method: "POST",
+    middlewares: [],
+    modules: [onRequestPost2]
+  },
   {
     routePath: "/api/admin/auth/request-otp",
     mountPath: "/api/admin/auth",
     method: "POST",
     middlewares: [],
-    modules: [onRequestPost]
+    modules: [onRequestPost3]
   },
   {
     routePath: "/api/admin/auth/session",
     mountPath: "/api/admin/auth",
     method: "GET",
     middlewares: [],
-    modules: [onRequestGet]
+    modules: [onRequestGet3]
   },
   {
     routePath: "/api/admin/auth/verify-otp",
     mountPath: "/api/admin/auth",
     method: "POST",
     middlewares: [],
-    modules: [onRequestPost2]
+    modules: [onRequestPost4]
+  },
+  {
+    routePath: "/api/admin/orders/action",
+    mountPath: "/api/admin/orders",
+    method: "POST",
+    middlewares: [],
+    modules: [onRequestPost5]
+  },
+  {
+    routePath: "/api/admin/products/override",
+    mountPath: "/api/admin/products",
+    method: "POST",
+    middlewares: [],
+    modules: [onRequestPost6]
+  },
+  {
+    routePath: "/api/admin/receipts/action",
+    mountPath: "/api/admin/receipts",
+    method: "POST",
+    middlewares: [],
+    modules: [onRequestPost7]
+  },
+  {
+    routePath: "/api/admin/settings/bank",
+    mountPath: "/api/admin/settings",
+    method: "GET",
+    middlewares: [],
+    modules: [onRequestGet4]
+  },
+  {
+    routePath: "/api/admin/settings/bank",
+    mountPath: "/api/admin/settings",
+    method: "POST",
+    middlewares: [],
+    modules: [onRequestPost8]
   },
   {
     routePath: "/api/admin/settings/margins",
     mountPath: "/api/admin/settings",
     method: "GET",
     middlewares: [],
-    modules: [onRequestGet2]
+    modules: [onRequestGet5]
   },
   {
     routePath: "/api/admin/settings/margins",
     mountPath: "/api/admin/settings",
     method: "POST",
     middlewares: [],
-    modules: [onRequestPost3]
+    modules: [onRequestPost9]
+  },
+  {
+    routePath: "/api/admin/static-ip/nodes",
+    mountPath: "/api/admin/static-ip",
+    method: "GET",
+    middlewares: [],
+    modules: [onRequestGet]
+  },
+  {
+    routePath: "/api/admin/static-ip/plans",
+    mountPath: "/api/admin/static-ip",
+    method: "GET",
+    middlewares: [],
+    modules: [onRequestGet2]
   },
   {
     routePath: "/api/admin/wallet/adjust",
     mountPath: "/api/admin/wallet",
     method: "POST",
     middlewares: [],
-    modules: [onRequestPost4]
+    modules: [onRequestPost10]
+  },
+  {
+    routePath: "/api/admin/orders",
+    mountPath: "/api/admin",
+    method: "GET",
+    middlewares: [],
+    modules: [onRequestGet6]
+  },
+  {
+    routePath: "/api/admin/receipts",
+    mountPath: "/api/admin",
+    method: "GET",
+    middlewares: [],
+    modules: [onRequestGet7]
   },
   {
     routePath: "/api/admin/users",
     mountPath: "/api/admin",
     method: "GET",
     middlewares: [],
-    modules: [onRequestGet3]
+    modules: [onRequestGet8]
   },
   {
     routePath: "/api/auth/session",
     mountPath: "/api/auth",
     method: "GET",
     middlewares: [],
-    modules: [onRequestGet4]
+    modules: [onRequestGet9]
   },
   {
     routePath: "/api/auth/telegram",
     mountPath: "/api/auth",
     method: "POST",
     middlewares: [],
-    modules: [onRequestPost5]
+    modules: [onRequestPost11]
   },
   {
     routePath: "/api/provider/products",
     mountPath: "/api/provider",
     method: "GET",
     middlewares: [],
-    modules: [onRequestGet5]
+    modules: [onRequestGet10]
+  },
+  {
+    routePath: "/api/static-ip/download",
+    mountPath: "/api/static-ip",
+    method: "GET",
+    middlewares: [],
+    modules: [onRequestGet11]
+  },
+  {
+    routePath: "/api/static-ip/download",
+    mountPath: "/api/static-ip",
+    method: "POST",
+    middlewares: [],
+    modules: [onRequestPost12]
+  },
+  {
+    routePath: "/api/static-ip/nodes",
+    mountPath: "/api/static-ip",
+    method: "GET",
+    middlewares: [],
+    modules: [onRequestGet12]
+  },
+  {
+    routePath: "/api/static-ip/plans",
+    mountPath: "/api/static-ip",
+    method: "GET",
+    middlewares: [],
+    modules: [onRequestGet13]
+  },
+  {
+    routePath: "/api/static-ip/resend",
+    mountPath: "/api/static-ip",
+    method: "POST",
+    middlewares: [],
+    modules: [onRequestPost13]
+  },
+  {
+    routePath: "/api/static-ip/services",
+    mountPath: "/api/static-ip",
+    method: "GET",
+    middlewares: [],
+    modules: [onRequestGet14]
+  },
+  {
+    routePath: "/api/wallet/receipt",
+    mountPath: "/api/wallet",
+    method: "POST",
+    middlewares: [],
+    modules: [onRequestPost14]
+  },
+  {
+    routePath: "/api/bank",
+    mountPath: "/api",
+    method: "GET",
+    middlewares: [],
+    modules: [onRequestGet15]
+  },
+  {
+    routePath: "/api/orders",
+    mountPath: "/api",
+    method: "GET",
+    middlewares: [],
+    modules: [onRequestGet16]
   },
   {
     routePath: "/api/products",
     mountPath: "/api",
     method: "GET",
     middlewares: [],
-    modules: [onRequestGet6]
+    modules: [onRequestGet17]
   },
   {
     routePath: "/api/purchase",
     mountPath: "/api",
     method: "POST",
     middlewares: [],
-    modules: [onRequestPost6]
+    modules: [onRequestPost15]
   },
   {
     routePath: "/api/sync",
     mountPath: "/api",
     method: "POST",
     middlewares: [],
-    modules: [onRequestPost7]
+    modules: [onRequestPost16]
   },
   {
     routePath: "/api/wallet",
     mountPath: "/api",
     method: "GET",
     middlewares: [],
-    modules: [onRequestGet7]
+    modules: [onRequestGet18]
   }
 ];
 

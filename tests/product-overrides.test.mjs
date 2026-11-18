@@ -86,7 +86,7 @@ async function expectError(response, status, code) {
   if (code) assert.equal(result.code, code)
 }
 function addProduct(id = 'p1', title = 'ChatGPT 1M') {
-  sqlite.prepare('INSERT INTO products (id,title,category,price,stock,synced_at) VALUES (?,?,?,?,?,?)').run(id, title, 'other', 100, 1, '2025-01-01')
+  sqlite.prepare('INSERT INTO products (id,title,category,price,stock,synced_at) VALUES (?,?,?,?,?,?)').run(id, title, 'ai', 100, 1, '2025-01-01')
 }
 async function syncCatalog() {
   const request = new Request('https://local.test/api/sync', { method: 'POST' })
@@ -290,4 +290,72 @@ test('sync retains original provider title and overrides survive resync and clea
   assert.equal(product.providerTitle, 'Netflix Premium')
   assert.equal(mapper.localizeProviderProduct(product).category, 'streaming')
   assert.equal(requests.length, 2)
+})
+
+test('GET bundle excludes the mapper and serves stored fields without classification', async () => {
+  const result = await build({ entryPoints: [resolve(root, 'functions/api/products.ts')], bundle: true, platform: 'neutral', format: 'esm', write: false, metafile: true, logLevel: 'silent' })
+  const inputs = Object.keys(result.metafile.inputs)
+  assert.ok(!inputs.some(path => /providerMapper|productCategories/.test(path)))
+
+  addProduct('p1', 'ChatGPT Netflix')
+  sqlite.prepare(`UPDATE products SET category = ?, description = ?, provider_title = ?,
+    logo_url = ?, features = ? WHERE id = ?`).run('gaming', 'ذخیره‌شده', 'ChatGPT Netflix', 'https://example.test/logo.png', '["ویژگی"]', 'p1')
+  const response = await getProducts()
+  assert.equal(response.status, 200)
+  const product = (await response.json()).data[0]
+  assert.equal(product.title, 'ChatGPT Netflix')
+  assert.equal(product.category, 'gaming')
+  assert.equal(product.description, 'ذخیره‌شده')
+  assert.equal(product.logoUrl, 'https://example.test/logo.png')
+  assert.deepEqual(product.features, ['ویژگی'])
+})
+
+test('soft deletion survives resync and preserves other overrides', async () => {
+  catalog = [{ id: 'p1', title: 'ChatGPT 1M', price: 10, stock: 1 }]
+  assert.equal((await syncCatalog()).status, 200)
+  assert.equal((await save(payload({ faDescription: 'دستی', customCategory: 'gaming', isFeatured: true }))).status, 200)
+  sqlite.prepare('UPDATE product_overrides SET is_deleted = 1 WHERE product_id = ?').run('p1')
+  assert.deepEqual((await (await getProducts()).json()).data, [])
+  catalog[0].title = 'Netflix Premium'
+  assert.equal((await syncCatalog()).status, 200)
+  assert.deepEqual((await (await getProducts()).json()).data, [])
+  const row = sqlite.prepare('SELECT * FROM product_overrides WHERE product_id = ?').get('p1')
+  assert.equal(row.is_deleted, 1)
+  assert.equal(row.fa_description, 'دستی')
+  assert.equal(row.custom_category, 'gaming')
+  assert.equal(row.is_featured, 1)
+})
+
+test('sync localizes 301 unique products, stores logos and batches prepared upserts', async () => {
+  catalog = Array.from({ length: 301 }, (_, index) => ({ id: `product-${index}`, title: index % 2 ? `Netflix Premium ${index}` : `ChatGPT ${index}`, price: 10, stock: 1 }))
+  catalog.push(catalog[0], { id: 'invalid', price: 1 })
+  let prepares = 0
+  let batches = 0
+  const prepare = db.prepare.bind(db)
+  const batch = db.batch.bind(db)
+  db.prepare = (sql) => { if (/INSERT INTO products\s*\(/i.test(sql)) prepares++; return prepare(sql) }
+  db.batch = async (statements) => { batches++; assert.ok(statements.length <= 50); return batch(statements) }
+  const response = await syncCatalog()
+  assert.equal(response.status, 200, await response.clone().text())
+  const result = await response.json()
+  assert.equal(result.data.synced, 301)
+  assert.equal(result.data.skipped, 2)
+  assert.equal(result.data.batches, 7)
+  assert.equal(prepares, 1)
+  assert.equal(batches, 7)
+  const saved = sqlite.prepare('SELECT category, title, provider_title, logo_url FROM products WHERE id = ?').get('product-0')
+  assert.equal(saved.category, 'ai')
+  assert.notEqual(saved.title, saved.provider_title)
+  assert.ok(saved.logo_url)
+  const productsRead = (await (await getProducts()).json()).data
+  assert.equal(productsRead.length, 301)
+  assert.equal(productsRead.find(item => item.id === 'product-0').logoUrl, saved.logo_url)
+  assert.equal(productsRead.find(item => item.id === 'product-1').category, 'streaming')
+})
+
+test('sync exposes a database batch failure', async () => {
+  catalog = [{ id: 'p1', title: 'ChatGPT', price: 1, stock: 1 }]
+  db.batch = async () => { throw new Error('write unavailable') }
+  await expectError(await syncCatalog(), 500, 'SYNC_DB_WRITE_FAILED')
+  assert.equal(sqlite.prepare('SELECT COUNT(*) AS n FROM products').get().n, 0)
 })

@@ -60,7 +60,6 @@ interface PagesContext {
 }
 
 const UPSTREAM_TIMEOUT_MS = 15_000
-/** Statements per D1 batch — keeps each Worker invocation well under limits. */
 const PRODUCTS_PER_BATCH = 50
 
 const RESPONSE_HEADERS = {
@@ -74,9 +73,9 @@ const UPSERT_SQL = `
     id, title, subtitle, category, price, old_price,
     provider_price, provider_old_price, provider_currency, currency,
     stock, rating, review_count, badge, delivery_time, description,
-    features, gradient, emoji, brand_key, provider_description, provider_title,
+    features, gradient, emoji, brand_key, provider_description, provider_title, logo_url,
     synced_at, created_at, updated_at
-  ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   ON CONFLICT(id) DO UPDATE SET
     title = excluded.title,
     subtitle = excluded.subtitle,
@@ -99,6 +98,7 @@ const UPSERT_SQL = `
     brand_key = excluded.brand_key,
     provider_description = excluded.provider_description,
     provider_title = excluded.provider_title,
+    logo_url = excluded.logo_url,
     synced_at = excluded.synced_at,
     updated_at = excluded.updated_at
 `
@@ -278,40 +278,37 @@ function toBindings(product: AccountProduct, syncedAt: string): unknown[] {
     product.brandKey ?? null,
     product.providerDescription ?? null,
     product.providerTitle ?? product.title,
+    product.logoUrl ?? null,
     syncedAt,
     syncedAt,
     syncedAt,
   ]
 }
 
-/**
- * Upsert the catalogue in bounded `db.batch()` chunks. One round-trip per
- * chunk instead of one per product keeps the Worker well under the CPU and
- * subrequest limits for catalogues of a few hundred rows.
- */
 async function writeProducts(
   db: D1Database,
   products: AccountProduct[],
   syncedAt: string,
 ): Promise<number> {
   let batches = 0
+  const statement = db.prepare(UPSERT_SQL)
+  let statements: D1PreparedStatement[] = []
 
-  for (let index = 0; index < products.length; index += PRODUCTS_PER_BATCH) {
-    const chunk = products.slice(index, index + PRODUCTS_PER_BATCH)
-    const statements = chunk.map((product) =>
-      db.prepare(UPSERT_SQL).bind(...toBindings(product, syncedAt)),
-    )
+  for (let index = 0; index < products.length; index += 1) {
+    statements.push(statement.bind(...toBindings(products[index], syncedAt)))
+    if (statements.length < PRODUCTS_PER_BATCH && index + 1 < products.length) continue
 
     try {
       await db.batch(statements)
     } catch (cause) {
       throw new SyncError(
         'SYNC_DB_WRITE_FAILED',
-        `ثبت ${chunk.length} محصول در D1 ناموفق بود (دسته ${batches + 1}).`,
+        `ثبت ${statements.length} محصول در D1 ناموفق بود (دسته ${batches + 1}).`,
         { cause },
       )
     }
     batches += 1
+    statements = []
   }
 
   return batches

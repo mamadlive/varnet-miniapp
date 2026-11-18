@@ -26,6 +26,7 @@
     "/api/admin/settings/margins",
     "/api/admin/settings/bank",
     "/api/admin/receipts/action",
+    "/api/admin/products/override",
     "/api/admin/orders/action",
     "/api/admin/auth/verify-otp",
     "/api/admin/auth/session",
