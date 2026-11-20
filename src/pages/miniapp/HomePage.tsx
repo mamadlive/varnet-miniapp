@@ -193,6 +193,10 @@ export default function HomePage() {
     () => products.filter((product) => product.stock > 0 && product.isFeatured),
     [products],
   )
+  const featuredPlans = useMemo(
+    () => plans.filter((plan) => plan.isFeatured && plan.isActive),
+    [plans],
+  )
   const bestsellers = useMemo(
     () => products.filter((product) => product.stock > 0 && product.isBestseller),
     [products],
@@ -344,7 +348,7 @@ export default function HomePage() {
           aria-labelledby="marketplace-tab-accounts"
           className="mt-5 animate-fade-in"
         >
-          {featured.length > 0 ? (
+          {featured.length > 0 || featuredPlans.length > 0 ? (
             <div className="mb-6" aria-labelledby="featured-products-heading">
               <div className="mb-2.5 flex items-end justify-between gap-3 px-0.5">
                 <div className="min-w-0">
@@ -375,6 +379,11 @@ export default function HomePage() {
                       onPurchase={handlePurchase}
                       style={{ animationDelay: `${index * 40}ms` }}
                     />
+                  ))}
+                  {featuredPlans.map((plan) => (
+                    <div key={plan.id} className="w-[262px] shrink-0 snap-start">
+                      <VpnOfferCard plan={plan} onPurchase={handlePurchase} />
+                    </div>
                   ))}
                 </div>
               </div>

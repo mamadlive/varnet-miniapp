@@ -22,6 +22,7 @@ export interface StaticIpPlanRow {
   price: number
   currency: string
   is_enabled: number
+  is_featured: number
   sort_order: number
   node_name: string
   country: string
@@ -33,7 +34,7 @@ export interface StaticIpPlanRow {
 }
 
 export const PLAN_SELECT = `SELECT p.id, p.node_id, p.name, p.data_cap_gb, p.duration_days,
-    p.price, p.currency, p.is_enabled, p.sort_order, p.created_at, p.updated_at,
+    p.price, p.currency, p.is_enabled, p.is_featured, p.sort_order, p.created_at, p.updated_at,
     n.name AS node_name, n.country, n.country_code, n.protocol, n.availability
   FROM static_ip_plans p
   JOIN static_ip_nodes n ON n.id = p.node_id`
@@ -48,6 +49,7 @@ export function toAdminPlan(row: StaticIpPlanRow) {
     price: Number(row.price),
     currency: 'IRT',
     enabled: Number(row.is_enabled) === 1,
+    isFeatured: Number(row.is_featured) === 1,
     sortOrder: Number(row.sort_order),
     nodeName: row.node_name,
     country: row.country,

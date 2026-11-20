@@ -42,6 +42,14 @@ export interface AdminEnv {
   TELEGRAM_BOT_TOKEN?: string
   /** Comma/space separated Telegram ids allowed to call admin routes. */
   ADMIN_TELEGRAM_IDS?: string
+  /**
+   * Digital-account provider — identical bindings to `/api/provider/products`.
+   * Read server-side only; the key never reaches the browser.
+   */
+  ACCOUNTS_PROVIDER_API_KEY?: string
+  ACCOUNTS_PROVIDER_BASE_URL?: string
+  /** Toman per 1 USDT, used to price the provider wallet balance. */
+  USDT_RATE_TOMAN?: string
 }
 
 export interface PagesContext {

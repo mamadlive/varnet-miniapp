@@ -9,6 +9,7 @@ import type {
   PaymentReceipt,
   PaymentReceiptStatus,
   ProductCategory,
+  ProviderOverview,
   RevenuePoint,
   StaticIpNode,
   StaticIpNodeAvailability,
@@ -156,6 +157,27 @@ export async function listUsers(): Promise<User[]> {
   const users = await adminGet<User[]>(endpoints.admin.users)
   if (!Array.isArray(users)) throw new ApiError('فهرست کاربران دریافتی نامعتبر بود.')
   return users
+}
+
+/**
+ * Provider account snapshot for the «ارائهدهنده» tab: the supplier's wallet
+ * balance / purchase history plus the provider-sourced D1 orders. The upstream
+ * provider is probed server-side; `provider.connected`/`code`/`message` report
+ * its status without throwing, so the page can always render.
+ */
+export async function fetchProviderOverview(): Promise<ProviderOverview> {
+  const data = await adminGet<ProviderOverview>(endpoints.admin.providerOverview)
+  if (!data || typeof data !== 'object' || !data.provider || typeof data.provider !== 'object') {
+    throw new ApiError('پاسخ وضعیت ارائه‌دهنده نامعتبر بود.')
+  }
+  if (!Array.isArray(data.orders)) throw new ApiError('فهرست سفارش‌های ارائه‌دهنده نامعتبر بود.')
+  return {
+    provider: {
+      ...data.provider,
+      purchases: Array.isArray(data.provider.purchases) ? data.provider.purchases : [],
+    },
+    orders: data.orders,
+  }
 }
 
 export interface WalletAdjustmentInput {
@@ -381,6 +403,8 @@ export interface StaticIpPlanInput {
   durationDays: number
   price: number
   enabled?: boolean
+  /** Promote the plan into the Mini App «پیشنهادهای ویژه» row. */
+  isFeatured?: boolean
   sortOrder?: number
 }
 

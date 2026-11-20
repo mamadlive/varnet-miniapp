@@ -5,6 +5,7 @@ import {
   Headset,
   LayoutDashboard,
   Megaphone,
+  Plug,
   ReceiptText,
   Server,
   Settings,
@@ -65,7 +66,10 @@ const NAV_GROUPS: AdminNavGroup[] = [
   },
   {
     title: 'سیستم',
-    items: [{ to: '/admin/settings', label: 'تنظیمات', icon: Settings }],
+    items: [
+      { to: '/admin/provider', label: 'ارائه‌دهنده', icon: Plug },
+      { to: '/admin/settings', label: 'تنظیمات', icon: Settings },
+    ],
   },
 ]
 

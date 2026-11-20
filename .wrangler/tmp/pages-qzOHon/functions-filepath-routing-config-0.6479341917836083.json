@@ -1,0 +1,381 @@
+{
+  "routes": [
+    {
+      "routePath": "/api/admin/static-ip/nodes/action",
+      "mountPath": "/api/admin/static-ip/nodes",
+      "method": "POST",
+      "module": [
+        "api/admin/static-ip/nodes/action.ts:onRequestPost"
+      ]
+    },
+    {
+      "routePath": "/api/admin/static-ip/plans/action",
+      "mountPath": "/api/admin/static-ip/plans",
+      "method": "POST",
+      "module": [
+        "api/admin/static-ip/plans/action.ts:onRequestPost"
+      ]
+    },
+    {
+      "routePath": "/api/admin/static-ip/services/access",
+      "mountPath": "/api/admin/static-ip/services",
+      "method": "POST",
+      "module": [
+        "api/admin/static-ip/services/access.ts:onRequestPost"
+      ]
+    },
+    {
+      "routePath": "/api/admin/auth/request-otp",
+      "mountPath": "/api/admin/auth",
+      "method": "POST",
+      "module": [
+        "api/admin/auth/request-otp.ts:onRequestPost"
+      ]
+    },
+    {
+      "routePath": "/api/admin/auth/session",
+      "mountPath": "/api/admin/auth",
+      "method": "GET",
+      "module": [
+        "api/admin/auth/session.ts:onRequestGet"
+      ]
+    },
+    {
+      "routePath": "/api/admin/auth/verify-otp",
+      "mountPath": "/api/admin/auth",
+      "method": "POST",
+      "module": [
+        "api/admin/auth/verify-otp.ts:onRequestPost"
+      ]
+    },
+    {
+      "routePath": "/api/admin/orders/action",
+      "mountPath": "/api/admin/orders",
+      "method": "POST",
+      "module": [
+        "api/admin/orders/action.ts:onRequestPost"
+      ]
+    },
+    {
+      "routePath": "/api/admin/products/delete",
+      "mountPath": "/api/admin/products",
+      "method": "POST",
+      "module": [
+        "api/admin/products/delete.ts:onRequestPost"
+      ]
+    },
+    {
+      "routePath": "/api/admin/products/override",
+      "mountPath": "/api/admin/products",
+      "method": "POST",
+      "module": [
+        "api/admin/products/override.ts:onRequestPost"
+      ]
+    },
+    {
+      "routePath": "/api/admin/receipts/action",
+      "mountPath": "/api/admin/receipts",
+      "method": "POST",
+      "module": [
+        "api/admin/receipts/action.ts:onRequestPost"
+      ]
+    },
+    {
+      "routePath": "/api/admin/settings/bank",
+      "mountPath": "/api/admin/settings",
+      "method": "GET",
+      "module": [
+        "api/admin/settings/bank.ts:onRequestGet"
+      ]
+    },
+    {
+      "routePath": "/api/admin/settings/bank",
+      "mountPath": "/api/admin/settings",
+      "method": "POST",
+      "module": [
+        "api/admin/settings/bank.ts:onRequestPost"
+      ]
+    },
+    {
+      "routePath": "/api/admin/settings/margins",
+      "mountPath": "/api/admin/settings",
+      "method": "GET",
+      "module": [
+        "api/admin/settings/margins.ts:onRequestGet"
+      ]
+    },
+    {
+      "routePath": "/api/admin/settings/margins",
+      "mountPath": "/api/admin/settings",
+      "method": "POST",
+      "module": [
+        "api/admin/settings/margins.ts:onRequestPost"
+      ]
+    },
+    {
+      "routePath": "/api/admin/static-ip/nodes",
+      "mountPath": "/api/admin/static-ip",
+      "method": "GET",
+      "module": [
+        "api/admin/static-ip/nodes.ts:onRequestGet"
+      ]
+    },
+    {
+      "routePath": "/api/admin/static-ip/plans",
+      "mountPath": "/api/admin/static-ip",
+      "method": "GET",
+      "module": [
+        "api/admin/static-ip/plans.ts:onRequestGet"
+      ]
+    },
+    {
+      "routePath": "/api/admin/wallet/adjust",
+      "mountPath": "/api/admin/wallet",
+      "method": "POST",
+      "module": [
+        "api/admin/wallet/adjust.ts:onRequestPost"
+      ]
+    },
+    {
+      "routePath": "/api/admin/broadcast",
+      "mountPath": "/api/admin",
+      "method": "GET",
+      "module": [
+        "api/admin/broadcast.ts:onRequestGet"
+      ]
+    },
+    {
+      "routePath": "/api/admin/broadcast",
+      "mountPath": "/api/admin",
+      "method": "PATCH",
+      "module": [
+        "api/admin/broadcast.ts:onRequestPatch"
+      ]
+    },
+    {
+      "routePath": "/api/admin/broadcast",
+      "mountPath": "/api/admin",
+      "method": "POST",
+      "module": [
+        "api/admin/broadcast.ts:onRequestPost"
+      ]
+    },
+    {
+      "routePath": "/api/admin/coupons",
+      "mountPath": "/api/admin",
+      "method": "GET",
+      "module": [
+        "api/admin/coupons.ts:onRequestGet"
+      ]
+    },
+    {
+      "routePath": "/api/admin/coupons",
+      "mountPath": "/api/admin",
+      "method": "POST",
+      "module": [
+        "api/admin/coupons.ts:onRequestPost"
+      ]
+    },
+    {
+      "routePath": "/api/admin/orders",
+      "mountPath": "/api/admin",
+      "method": "GET",
+      "module": [
+        "api/admin/orders.ts:onRequestGet"
+      ]
+    },
+    {
+      "routePath": "/api/admin/receipts",
+      "mountPath": "/api/admin",
+      "method": "GET",
+      "module": [
+        "api/admin/receipts.ts:onRequestGet"
+      ]
+    },
+    {
+      "routePath": "/api/admin/stats",
+      "mountPath": "/api/admin",
+      "method": "GET",
+      "module": [
+        "api/admin/stats.ts:onRequestGet"
+      ]
+    },
+    {
+      "routePath": "/api/admin/support",
+      "mountPath": "/api/admin",
+      "method": "GET",
+      "module": [
+        "api/admin/support.ts:onRequestGet"
+      ]
+    },
+    {
+      "routePath": "/api/admin/support",
+      "mountPath": "/api/admin",
+      "method": "POST",
+      "module": [
+        "api/admin/support.ts:onRequestPost"
+      ]
+    },
+    {
+      "routePath": "/api/admin/users",
+      "mountPath": "/api/admin",
+      "method": "GET",
+      "module": [
+        "api/admin/users.ts:onRequestGet"
+      ]
+    },
+    {
+      "routePath": "/api/auth/session",
+      "mountPath": "/api/auth",
+      "method": "GET",
+      "module": [
+        "api/auth/session.ts:onRequestGet"
+      ]
+    },
+    {
+      "routePath": "/api/auth/telegram",
+      "mountPath": "/api/auth",
+      "method": "POST",
+      "module": [
+        "api/auth/telegram.ts:onRequestPost"
+      ]
+    },
+    {
+      "routePath": "/api/provider/products",
+      "mountPath": "/api/provider",
+      "method": "GET",
+      "module": [
+        "api/provider/products.ts:onRequestGet"
+      ]
+    },
+    {
+      "routePath": "/api/static-ip/download",
+      "mountPath": "/api/static-ip",
+      "method": "GET",
+      "module": [
+        "api/static-ip/download.ts:onRequestGet"
+      ]
+    },
+    {
+      "routePath": "/api/static-ip/download",
+      "mountPath": "/api/static-ip",
+      "method": "POST",
+      "module": [
+        "api/static-ip/download.ts:onRequestPost"
+      ]
+    },
+    {
+      "routePath": "/api/static-ip/nodes",
+      "mountPath": "/api/static-ip",
+      "method": "GET",
+      "module": [
+        "api/static-ip/nodes.ts:onRequestGet"
+      ]
+    },
+    {
+      "routePath": "/api/static-ip/plans",
+      "mountPath": "/api/static-ip",
+      "method": "GET",
+      "module": [
+        "api/static-ip/plans.ts:onRequestGet"
+      ]
+    },
+    {
+      "routePath": "/api/static-ip/resend",
+      "mountPath": "/api/static-ip",
+      "method": "POST",
+      "module": [
+        "api/static-ip/resend.ts:onRequestPost"
+      ]
+    },
+    {
+      "routePath": "/api/static-ip/services",
+      "mountPath": "/api/static-ip",
+      "method": "GET",
+      "module": [
+        "api/static-ip/services.ts:onRequestGet"
+      ]
+    },
+    {
+      "routePath": "/api/wallet/receipt",
+      "mountPath": "/api/wallet",
+      "method": "POST",
+      "module": [
+        "api/wallet/receipt.ts:onRequestPost"
+      ]
+    },
+    {
+      "routePath": "/api/bank",
+      "mountPath": "/api",
+      "method": "GET",
+      "module": [
+        "api/bank.ts:onRequestGet"
+      ]
+    },
+    {
+      "routePath": "/api/coupon",
+      "mountPath": "/api",
+      "method": "POST",
+      "module": [
+        "api/coupon.ts:onRequestPost"
+      ]
+    },
+    {
+      "routePath": "/api/orders",
+      "mountPath": "/api",
+      "method": "GET",
+      "module": [
+        "api/orders.ts:onRequestGet"
+      ]
+    },
+    {
+      "routePath": "/api/products",
+      "mountPath": "/api",
+      "method": "GET",
+      "module": [
+        "api/products.ts:onRequestGet"
+      ]
+    },
+    {
+      "routePath": "/api/purchase",
+      "mountPath": "/api",
+      "method": "POST",
+      "module": [
+        "api/purchase.ts:onRequestPost"
+      ]
+    },
+    {
+      "routePath": "/api/support",
+      "mountPath": "/api",
+      "method": "GET",
+      "module": [
+        "api/support.ts:onRequestGet"
+      ]
+    },
+    {
+      "routePath": "/api/support",
+      "mountPath": "/api",
+      "method": "POST",
+      "module": [
+        "api/support.ts:onRequestPost"
+      ]
+    },
+    {
+      "routePath": "/api/sync",
+      "mountPath": "/api",
+      "method": "POST",
+      "module": [
+        "api/sync.ts:onRequestPost"
+      ]
+    },
+    {
+      "routePath": "/api/wallet",
+      "mountPath": "/api",
+      "method": "GET",
+      "module": [
+        "api/wallet.ts:onRequestGet"
+      ]
+    }
+  ],
+  "baseURL": "/"
+}

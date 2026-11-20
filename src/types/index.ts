@@ -132,6 +132,8 @@ export interface VpnPlan {
   staticIp: boolean
   stock: number
   isActive: boolean
+  /** Promoted into the Mini App «پیشنهادهای ویژه» row when true (still needs `isActive`). */
+  isFeatured: boolean
   availability: VpnPlanAvailability
   features: string[]
   pingMs?: number
@@ -188,6 +190,8 @@ export interface StaticIpPlan {
   price: number
   currency: Currency
   enabled: boolean
+  /** Promoted into the Mini App «پیشنهادهای ویژه» row when true (still needs `enabled`). */
+  isFeatured: boolean
   sortOrder: number
   nodeName: string
   country: string
@@ -394,6 +398,65 @@ export interface Broadcast {
   audience: BroadcastAudience
   recipients: number
   sentAt: string
+}
+
+/* -------------------------------------------------------------------------- */
+/* Provider (digital-account supplier)                                        */
+/* -------------------------------------------------------------------------- */
+
+/** Wallet snapshot reported by the third-party accounts provider. */
+export interface ProviderWallet {
+  balance: number
+  currency: string
+  /** Balance converted to Toman when the currency is known; null otherwise. */
+  balanceToman: number | null
+}
+
+/** One purchase recorded on the provider account. */
+export interface ProviderPurchase {
+  id: string
+  title: string
+  amount: number
+  currency: string
+  status: string
+  createdAt: string | null
+}
+
+/** A provider-sourced account order from D1 (pending / paid / completed). */
+export interface ProviderSourcedOrder {
+  id: string
+  productId: string
+  title: string
+  quantity: number
+  total: number
+  status: OrderStatus
+  paymentMethod: PaymentMethod
+  /** True once an admin attached a delivery note to the order. */
+  delivered: boolean
+  userName?: string
+  telegramId?: number
+  createdAt: string
+}
+
+/** Admin-only view of the digital-account provider account and its orders. */
+export interface ProviderOverview {
+  provider: {
+    /** True once `ACCOUNTS_PROVIDER_API_KEY` is set on the server. */
+    configured: boolean
+    /** True when at least one provider endpoint answered successfully. */
+    connected: boolean
+    baseUrl: string | null
+    /** Error code when the provider could not be reached / parsed. */
+    code: string | null
+    /** Human-readable (Persian) description of `code`. */
+    message: string | null
+    wallet: ProviderWallet | null
+    purchases: ProviderPurchase[]
+    purchasedCount: number
+    fetchedAt: string
+    usdtRate: number
+  }
+  orders: ProviderSourcedOrder[]
 }
 
 /* -------------------------------------------------------------------------- */

@@ -64,6 +64,8 @@ export const endpoints = {
     staticIpPlanAction: '/api/admin/static-ip/plans/action',
     /** Suspend / reactivate a completed static-IP service (access, not billing). */
     staticIpServiceAccess: '/api/admin/static-ip/services/access',
+    /** Digital-account provider account: wallet balance + purchase history. */
+    providerOverview: '/api/admin/provider/overview',
     /** Support inbox shared with the Mini App (real D1 tickets). */
     support: '/api/admin/support',
   },

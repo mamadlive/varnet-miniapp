@@ -24,6 +24,7 @@ interface ActionBody {
   durationDays?: unknown
   price?: unknown
   enabled?: unknown
+  isFeatured?: unknown
   sortOrder?: unknown
 }
 
@@ -132,6 +133,8 @@ export async function onRequestPost(context: PagesContext): Promise<Response> {
         ? (existing?.sort_order ?? 100)
         : intInRange(body.sortOrder, 0, 100_000)
     const enabled = body.enabled === undefined ? true : body.enabled === true
+    const isFeatured =
+      body.isFeatured === undefined ? existing?.is_featured === 1 : body.isFeatured === true
 
     if (!nodeId) return failure(400, 'INVALID_NODE', 'نود متصل به پلن را انتخاب کنید.')
     if (name.length < 2 || name.length > 80) {
@@ -163,7 +166,7 @@ export async function onRequestPost(context: PagesContext): Promise<Response> {
         .prepare(
           `UPDATE static_ip_plans
            SET node_id = ?, name = ?, data_cap_gb = ?, duration_days = ?, price = ?,
-               is_enabled = ?, sort_order = ?, updated_at = ?
+               is_enabled = ?, is_featured = ?, sort_order = ?, updated_at = ?
            WHERE id = ?`,
         )
         .bind(
@@ -173,6 +176,7 @@ export async function onRequestPost(context: PagesContext): Promise<Response> {
           durationDays,
           price,
           enabled ? 1 : 0,
+          isFeatured ? 1 : 0,
           sortOrder,
           now,
           id,
@@ -183,10 +187,22 @@ export async function onRequestPost(context: PagesContext): Promise<Response> {
         .prepare(
           `INSERT INTO static_ip_plans
              (id, node_id, name, data_cap_gb, duration_days, price, currency,
-              is_enabled, sort_order, created_at, updated_at)
-           VALUES (?, ?, ?, ?, ?, ?, 'IRT', ?, ?, ?, ?)`,
+              is_enabled, is_featured, sort_order, created_at, updated_at)
+           VALUES (?, ?, ?, ?, ?, ?, 'IRT', ?, ?, ?, ?, ?)`,
         )
-        .bind(id, nodeId, name, dataCapGb, durationDays, price, enabled ? 1 : 0, sortOrder, now, now)
+        .bind(
+          id,
+          nodeId,
+          name,
+          dataCapGb,
+          durationDays,
+          price,
+          enabled ? 1 : 0,
+          isFeatured ? 1 : 0,
+          sortOrder,
+          now,
+          now,
+        )
         .run()
     }
 

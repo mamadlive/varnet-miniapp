@@ -105,6 +105,7 @@ export function mapPlanToVpnPlan(plan: StaticIpPlan): VpnPlan {
     staticIp: true,
     stock: plan.availability === 'in_stock' ? 999 : 0,
     isActive,
+    isFeatured: plan.isFeatured,
     availability: plan.availability,
     features: [
       `${plan.dataCapGb} گیگابایت حجم`,

@@ -38,6 +38,7 @@ const AdminReceiptsPage = lazy(() => import('@/pages/admin/PaymentReceiptsPage')
 const CouponsPage = lazy(() => import('@/pages/admin/CouponsPage'))
 const TicketsPage = lazy(() => import('@/pages/admin/TicketsPage'))
 const BroadcastPage = lazy(() => import('@/pages/admin/BroadcastPage'))
+const ProviderPage = lazy(() => import('@/pages/admin/ProviderPage'))
 const SettingsPage = lazy(() => import('@/pages/admin/SettingsPage'))
 
 function RouteFallback() {
@@ -98,6 +99,7 @@ export default function App() {
               <Route path="coupons" element={<CouponsPage />} />
               <Route path="tickets" element={<TicketsPage />} />
               <Route path="broadcast" element={<BroadcastPage />} />
+              <Route path="provider" element={<ProviderPage />} />
               <Route path="settings" element={<SettingsPage />} />
               <Route path="*" element={<NotFoundPage />} />
             </Route>

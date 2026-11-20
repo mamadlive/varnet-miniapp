@@ -129,6 +129,7 @@ interface PlanForm {
   durationDays: string
   price: string
   enabled: boolean
+  isFeatured: boolean
 }
 
 const EMPTY_PLAN_FORM: PlanForm = {
@@ -138,6 +139,7 @@ const EMPTY_PLAN_FORM: PlanForm = {
   durationDays: '30',
   price: '150000',
   enabled: true,
+  isFeatured: false,
 }
 
 function planFormFromPlan(plan: StaticIpPlan): PlanForm {
@@ -148,6 +150,7 @@ function planFormFromPlan(plan: StaticIpPlan): PlanForm {
     durationDays: String(plan.durationDays),
     price: String(plan.price),
     enabled: plan.enabled,
+    isFeatured: plan.isFeatured,
   }
 }
 
@@ -413,6 +416,7 @@ export default function VpnServersPage() {
         durationDays: Number(planForm.durationDays),
         price: Number(planForm.price),
         enabled: planForm.enabled,
+        isFeatured: planForm.isFeatured,
       })
       setPlans((previous) => {
         const exists = previous.some((item) => item.id === saved.id)
@@ -601,6 +605,11 @@ export default function VpnServersPage() {
                         <Badge tone={plan.enabled ? 'success' : 'neutral'} size="sm">
                           {plan.enabled ? 'قابل فروش' : 'غیرفعال'}
                         </Badge>
+                        {plan.isFeatured ? (
+                          <Badge tone="brand" size="sm">
+                            پیشنهاد ویژه
+                          </Badge>
+                        ) : null}
                         <Badge tone={AVAILABILITY_TONES[plan.availability]} size="sm">
                           {AVAILABILITY_LABELS[plan.availability]}
                         </Badge>
@@ -1011,6 +1020,25 @@ export default function VpnServersPage() {
               label="فروش پلن در مینی‌اپ"
             />
           </div>
+
+          <label className="flex cursor-pointer items-start gap-2.5 rounded-xl border border-tg-separator p-3">
+            <input
+              type="checkbox"
+              checked={planForm.isFeatured}
+              disabled={planSaving}
+              onChange={(event) => patchPlanForm({ isFeatured: event.target.checked })}
+              className="mt-0.5 size-4 shrink-0 accent-brand-500"
+            />
+            <span className="min-w-0">
+              <span className="block text-[12.5px] font-semibold text-tg-text">
+                نمایش در پیشنهادهای ویژه صفحه اصلی
+              </span>
+              <span className="mt-0.5 block text-[11px] leading-relaxed text-tg-hint">
+                این پلن در ردیف «پیشنهادهای ویژه» صفحه اصلی مینی‌اپ، کنار محصولات ویژه بازارچه
+                نمایش داده می‌شود (نیازمند فعال بودن پلن).
+              </span>
+            </span>
+          </label>
         </div>
       </Sheet>
 
