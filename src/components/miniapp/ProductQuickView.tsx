@@ -1,5 +1,6 @@
 import { Check, FileText, Star, StickyNote, Tag, Wallet, Zap } from 'lucide-react'
 import { BrandLogo } from '@/components/marketplace/BrandLogo'
+import { TwoFactorGuideCard } from '@/components/miniapp/TwoFactorGuideCard'
 import { Badge, Button, Sheet } from '@/components/ui'
 import { useTelegram } from '@/hooks/useTelegram'
 import { formatCount, formatCurrency, formatNumber } from '@/lib/format'
@@ -34,6 +35,17 @@ export function ProductQuickView({ product, onClose, onPurchase }: ProductQuickV
       ? product.providerDescription.trim()
       : undefined
   const typeTags = extractProductTags(product.providerTitle ?? product.title, product.providerDescription)
+  // CDK/authenticator offers ship a 2FA seed in the delivery text, so the
+  // how-to is surfaced whenever the title, tags or copy hint at a code.
+  const twoFactorHint = /(2fa|totp|cdk|authenticator|verification)/i.test(
+    [
+      product.title,
+      product.providerTitle ?? '',
+      product.description ?? '',
+      product.providerDescription ?? '',
+    ].join(' '),
+  )
+  const needsTwoFactor = typeTags.includes('CDK') || twoFactorHint
 
   const handleSelect = () => {
     haptic('medium')
@@ -178,6 +190,8 @@ export function ProductQuickView({ product, onClose, onPurchase }: ProductQuickV
             </p>
           </section>
         ) : null}
+
+        {needsTwoFactor ? <TwoFactorGuideCard /> : null}
 
         <div className="flex items-center justify-between rounded-xl bg-tg-secondary-bg px-3 py-2.5">
           <span className="text-[12px] text-tg-hint">موجودی</span>

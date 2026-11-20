@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom'
 import { CalendarClock, KeyRound, ReceiptText } from 'lucide-react'
 
 import { OpenVpnNotice } from '@/components/miniapp/OpenVpnNotice'
+import { TwoFactorGuideCard } from '@/components/miniapp/TwoFactorGuideCard'
 import { Button } from '@/components/ui/Button'
 import { Sheet } from '@/components/ui/Sheet'
 import { OrderStatusBadge } from '@/components/wallet/OrderStatusBadge'
@@ -168,15 +169,19 @@ export function OrderDetailsSheet({ order, open, onClose }: OrderDetailsSheetPro
                 <bdi>{order.deliveryNote}</bdi>
               </pre>
               {order.kind === 'account' ? (
-                <Button
-                  variant="secondary"
-                  fullWidth
-                  className="mt-2"
-                  leftIcon={<KeyRound className="size-4" aria-hidden />}
-                  onClick={openTwoFactorTool}
-                >
-                  {totpSecret ? 'ساخت کد تایید ۲۴ (2FA) با این کلید' : 'باز کردن ابزار کد تایید ۲۴ (2FA)'}
-                </Button>
+                <div className="mt-2 space-y-2">
+                  <Button
+                    variant="secondary"
+                    fullWidth
+                    leftIcon={<KeyRound className="size-4" aria-hidden />}
+                    onClick={openTwoFactorTool}
+                  >
+                    {totpSecret
+                      ? 'ساخت کد تایید ۲۴ (2FA) با این کلید'
+                      : 'باز کردن ابزار کد تایید ۲۴ (2FA)'}
+                  </Button>
+                  <TwoFactorGuideCard compact secretFound={Boolean(totpSecret)} />
+                </div>
               ) : null}
             </section>
           ) : null}
