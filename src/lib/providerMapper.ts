@@ -2,6 +2,7 @@
 // into Cloudflare Pages Functions and applied during `/api/sync`.
 import { toPersianDigits } from './format'
 import { classifyProduct } from './productCategories'
+import { extractProductTags } from './productTags'
 import type { AccountProduct, ProductCategory } from '../types'
 
 /**
@@ -2484,6 +2485,12 @@ function localizeTitle(
   if (quota && !duration) parts.push(quota)
   if (region) parts.push(region)
   if (amount) parts.push(amount)
+
+  // Type/warranty markers ("CDK", "Apple Pay", "No Card", …) keep two offers of
+  // the same brand distinguishable in the title itself, not only in a chip.
+  for (const tag of extractProductTags(raw, combinedText)) {
+    if (!parts.some((part) => part.includes(tag))) parts.push(tag)
+  }
 
   return parts.join(' ')
 }

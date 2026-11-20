@@ -13,6 +13,7 @@ import MiniAppOrdersPage from '@/pages/miniapp/OrdersPage'
 import ProfilePage from '@/pages/miniapp/ProfilePage'
 import SupportPage from '@/pages/miniapp/SupportPage'
 import TermsPage from '@/pages/miniapp/TermsPage'
+import TwoFactorPage from '@/pages/miniapp/TwoFactorPage'
 import VpnPage from '@/pages/miniapp/VpnPage'
 import WalletPage from '@/pages/miniapp/WalletPage'
 import { AdminGuard } from '@/routes/AdminGuard'
@@ -72,6 +73,7 @@ export default function App() {
               <Route path="vpn" element={<VpnPage />} />
               <Route path="wallet" element={<WalletPage />} />
               <Route path="orders" element={<MiniAppOrdersPage />} />
+              <Route path="2fa" element={<TwoFactorPage />} />
               <Route path="support" element={<SupportPage />} />
               <Route path="terms" element={<TermsPage />} />
               <Route path="profile" element={<ProfilePage />} />

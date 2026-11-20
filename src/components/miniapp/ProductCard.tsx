@@ -3,6 +3,7 @@ import { BrandLogo } from '@/components/marketplace/BrandLogo'
 import { Badge, Skeleton } from '@/components/ui'
 import { formatCount, formatCurrency, formatNumber } from '@/lib/format'
 import { fa } from '@/lib/i18n'
+import { extractProductTags } from '@/lib/productTags'
 import { cn } from '@/lib/utils'
 import type { AccountProduct } from '@/types'
 
@@ -19,6 +20,7 @@ export interface ProductCardProps {
 export function ProductCard({ product, onSelect, className }: ProductCardProps) {
   const outOfStock = product.stock <= 0
   const lowStock = !outOfStock && product.stock <= 5
+  const typeTags = extractProductTags(product.providerTitle ?? product.title).slice(0, 2)
 
   return (
     <button
@@ -53,6 +55,21 @@ export function ProductCard({ product, onSelect, className }: ProductCardProps) 
           >
             {product.badge}
           </Badge>
+        ) : null}
+
+        {typeTags.length > 0 ? (
+          <span className="absolute end-2 top-2 flex max-w-[75%] flex-wrap justify-end gap-1">
+            {typeTags.map((tag) => (
+              <Badge
+                key={tag}
+                tone="neutral"
+                size="sm"
+                className="bg-white/90 text-black shadow-sm backdrop-blur"
+              >
+                {tag}
+              </Badge>
+            ))}
+          </span>
         ) : null}
 
         {product.rating !== undefined ? (

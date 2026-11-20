@@ -4,6 +4,7 @@ import type { LucideIcon } from 'lucide-react'
 import {
   ChevronLeft,
   Info,
+  KeyRound,
   Languages,
   LayoutDashboard,
   LifeBuoy,
@@ -232,6 +233,12 @@ export default function ProfilePage() {
             onClick={() => haptic()}
           />
           <MenuRow icon={Wallet} label="کیف پول" to="/app/wallet" onClick={() => haptic()} />
+          <MenuRow
+            icon={KeyRound}
+            label="کد تایید ۲۴ (2FA)"
+            to="/app/2fa"
+            onClick={() => haptic()}
+          />
         </Card>
       </div>
 

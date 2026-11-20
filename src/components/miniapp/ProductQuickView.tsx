@@ -1,10 +1,11 @@
-import { Check, FileText, Star, StickyNote, Wallet, Zap } from 'lucide-react'
+import { Check, FileText, Star, StickyNote, Tag, Wallet, Zap } from 'lucide-react'
 import { BrandLogo } from '@/components/marketplace/BrandLogo'
 import { Badge, Button, Sheet } from '@/components/ui'
 import { useTelegram } from '@/hooks/useTelegram'
 import { formatCount, formatCurrency, formatNumber } from '@/lib/format'
 import { fa } from '@/lib/i18n'
 import { CATEGORY_LABELS } from '@/lib/productCategories'
+import { extractProductTags } from '@/lib/productTags'
 import { cn } from '@/lib/utils'
 import type { AccountProduct } from '@/types'
 
@@ -26,10 +27,13 @@ export function ProductQuickView({ product, onClose, onPurchase }: ProductQuickV
   const features = product.features ?? []
   const categoryLabel = CATEGORY_LABELS[product.customCategory ?? product.category]
   const description = product.faDescription?.trim() || product.description
+  // The verbatim upstream copy is always shown when it adds anything over the
+  // localized blurb — it carries the delivery format and warranty instructions.
   const providerDescription =
-    !product.faDescription?.trim() && product.providerDescription && product.providerDescription !== description
-      ? product.providerDescription
+    product.providerDescription?.trim() && product.providerDescription.trim() !== description?.trim()
+      ? product.providerDescription.trim()
       : undefined
+  const typeTags = extractProductTags(product.providerTitle ?? product.title, product.providerDescription)
 
   const handleSelect = () => {
     haptic('medium')
@@ -111,6 +115,17 @@ export function ProductQuickView({ product, onClose, onPurchase }: ProductQuickV
           ) : null}
         </div>
 
+        {typeTags.length > 0 ? (
+          <div className="flex flex-wrap gap-1.5">
+            {typeTags.map((tag) => (
+              <Badge key={tag} tone="info" size="sm">
+                <Tag className="size-3" aria-hidden />
+                {tag}
+              </Badge>
+            ))}
+          </div>
+        ) : null}
+
         {description ? (
           <p dir="auto" className="whitespace-pre-line text-[13px] leading-relaxed text-tg-hint">
             {description}
@@ -150,18 +165,18 @@ export function ProductQuickView({ product, onClose, onPurchase }: ProductQuickV
         ) : null}
 
         {providerDescription ? (
-          <details className="group rounded-xl border border-tg-separator bg-tg-bg">
-            <summary className="flex min-h-11 cursor-pointer list-none items-center gap-1.5 px-3 py-2 text-[12px] font-medium text-tg-hint [&::-webkit-details-marker]:hidden">
+          <section className="rounded-xl border border-tg-separator bg-tg-secondary-bg/60 p-3">
+            <p className="mb-1.5 flex items-center gap-1.5 text-[11.5px] font-semibold text-tg-hint">
               <FileText className="size-3.5 shrink-0" aria-hidden />
-              توضیحات ارائه‌دهنده (متن اصلی)
-            </summary>
+              توضیحات کامل ارائه‌دهنده
+            </p>
             <p
               dir="auto"
-              className="max-h-48 overflow-y-auto whitespace-pre-line px-3 pb-3 text-[12px] leading-relaxed text-tg-hint"
+              className="whitespace-pre-line break-words text-[12.5px] leading-relaxed text-tg-text"
             >
               {providerDescription}
             </p>
-          </details>
+          </section>
         ) : null}
 
         <div className="flex items-center justify-between rounded-xl bg-tg-secondary-bg px-3 py-2.5">

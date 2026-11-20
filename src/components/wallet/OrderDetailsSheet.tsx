@@ -1,4 +1,6 @@
-import { CalendarClock, ReceiptText } from 'lucide-react'
+import { useMemo } from 'react'
+import { useNavigate } from 'react-router-dom'
+import { CalendarClock, KeyRound, ReceiptText } from 'lucide-react'
 
 import { OpenVpnNotice } from '@/components/miniapp/OpenVpnNotice'
 import { Button } from '@/components/ui/Button'
@@ -6,6 +8,7 @@ import { Sheet } from '@/components/ui/Sheet'
 import { OrderStatusBadge } from '@/components/wallet/OrderStatusBadge'
 import { formatCount, formatCurrency, formatDateTime } from '@/lib/format'
 import { fa } from '@/lib/i18n'
+import { extractTotpSecret } from '@/lib/totp'
 import { cn } from '@/lib/utils'
 import type { Order, OrderStatus } from '@/types'
 
@@ -83,15 +86,28 @@ export interface OrderDetailsSheetProps {
 
 /** Full order breakdown opened from an `OrderCard`. */
 export function OrderDetailsSheet({ order, open, onClose }: OrderDetailsSheetProps) {
+  const navigate = useNavigate()
   const subtotal = order
     ? order.items.reduce((total, item) => total + item.unitPrice * item.quantity, 0)
     : 0
   const steps = order ? buildTimeline(order) : []
+  // The delivery text of an account order often carries the 2FA seed; when it
+  // does, the authenticator opens with the secret already filled in.
+  const totpSecret = useMemo(
+    () => (order?.deliveryNote ? extractTotpSecret(order.deliveryNote) : null),
+    [order?.deliveryNote],
+  )
   const vpnDelivered =
     order?.kind === 'vpn' &&
     (order.status === 'paid' ||
       order.status === 'provisioning' ||
       order.status === 'completed')
+
+  const openTwoFactorTool = () => {
+    const query = totpSecret ? `?secret=${encodeURIComponent(totpSecret)}` : ''
+    onClose()
+    navigate(`/app/2fa${query}`)
+  }
 
   return (
     <Sheet
@@ -151,6 +167,17 @@ export function OrderDetailsSheet({ order, open, onClose }: OrderDetailsSheetPro
               <pre className="whitespace-pre-wrap break-words rounded-xl border border-emerald-500/25 bg-emerald-500/10 p-3 text-[12px] leading-relaxed text-tg-text">
                 <bdi>{order.deliveryNote}</bdi>
               </pre>
+              {order.kind === 'account' ? (
+                <Button
+                  variant="secondary"
+                  fullWidth
+                  className="mt-2"
+                  leftIcon={<KeyRound className="size-4" aria-hidden />}
+                  onClick={openTwoFactorTool}
+                >
+                  {totpSecret ? 'ساخت کد تایید ۲۴ (2FA) با این کلید' : 'باز کردن ابزار کد تایید ۲۴ (2FA)'}
+                </Button>
+              ) : null}
             </section>
           ) : null}
 
