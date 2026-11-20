@@ -1,6 +1,6 @@
 import type { CSSProperties, ReactNode } from 'react'
 import type { LucideIcon } from 'lucide-react'
-import { CalendarDays, Gauge, ShieldCheck, ShoppingBag } from 'lucide-react'
+import { CalendarDays, Clock, Gauge, ShieldCheck, ShoppingBag } from 'lucide-react'
 import { CountryFlag } from '@/components/miniapp/CountryFlag'
 import { Badge } from '@/components/ui/Badge'
 import { Button } from '@/components/ui/Button'
@@ -25,23 +25,141 @@ function bandwidthLabel(bandwidthMbps: number): string {
   return bandwidthMbps >= 1000 ? '۱ گیگابیت' : `${formatCount(bandwidthMbps)} مگابیت`
 }
 
+/** Node city parsed out of the plan name (`آی‌پی ثابت اختصاصی · آلمان`). */
+function planCity(plan: VpnPlan): string {
+  return plan.name.split('·').slice(1).join('·').trim() || plan.name
+}
+
+function planTitle(plan: VpnPlan): string {
+  return `${plan.location} · آی‌پی ثابت اختصاصی`
+}
+
+export type VpnOfferCardVariant = 'list' | 'featured'
+
 export interface VpnOfferCardProps {
   plan: VpnPlan
   onPurchase: (target: PurchaseTarget) => void
+  /**
+   * `list` (default) is the stacked storefront row; `featured` mirrors the
+   * home «پیشنهادهای ویژه» cards so plans sit flush with the marketplace ones.
+   */
+  variant?: VpnOfferCardVariant
   className?: string
   style?: CSSProperties
 }
 
 /**
- * Static IP VPN offer: node location + flag, dedicated IPv4 specs, price per
- * term and a dedicated purchase action (the parent opens the confirmation
- * sheet).
+ * Static IP VPN offer: node location + flag, dedicated IPv4 specs and a
+ * dedicated purchase action (the parent opens the confirmation sheet).
  */
-export function VpnOfferCard({ plan, onPurchase, className, style }: VpnOfferCardProps) {
+export function VpnOfferCard({
+  plan,
+  onPurchase,
+  variant = 'list',
+  className,
+  style,
+}: VpnOfferCardProps) {
   const comingSoon = plan.availability === 'coming_soon'
   const unavailable = comingSoon || !plan.isActive || plan.stock <= 0
-  const city = plan.name.split('·').slice(1).join('·').trim() || plan.name
-  const title = `${plan.location} · آی‌پی ثابت اختصاصی`
+  const title = planTitle(plan)
+  const city = planCity(plan)
+  /** City + term; the country already heads the hero title, so it is not repeated. */
+  const heroSubtitle = [
+    city && city !== plan.location ? city : null,
+    `${formatCount(plan.durationDays)} روز`,
+    plan.bandwidthMbps ? bandwidthLabel(plan.bandwidthMbps) : null,
+  ]
+    .filter(Boolean)
+    .join(' · ')
+
+  if (variant === 'featured') {
+    return (
+      <article
+        style={style}
+        className={cn(
+          'group relative flex w-[262px] shrink-0 snap-start flex-col overflow-hidden rounded-[22px] border border-tg-separator bg-tg-bg text-start shadow-[0_12px_28px_-18px_rgba(15,23,42,0.55)] transition-all duration-200 hover:-translate-y-0.5 hover:shadow-[0_18px_36px_-18px_rgba(15,23,42,0.55)]',
+          className,
+        )}
+      >
+        <div className="relative isolate overflow-hidden bg-gradient-to-br from-brand-500 to-brand-700 p-3.5 text-white">
+          <span aria-hidden className="absolute -left-10 -top-12 size-32 rounded-full bg-white/25 blur-2xl" />
+          <span aria-hidden className="absolute -bottom-16 -right-8 size-36 rounded-full bg-black/25 blur-2xl" />
+          <span aria-hidden className="absolute inset-0 bg-gradient-to-t from-black/40 via-black/10 to-transparent" />
+
+          <div className="relative flex items-start justify-between gap-2">
+            <span className="inline-flex h-6 items-center rounded-full border border-white/30 bg-white/20 px-2.5 text-[10px] font-semibold text-white shadow-sm backdrop-blur-md">
+              پیشنهاد ویژه
+            </span>
+            <span className="inline-flex h-6 shrink-0 items-center gap-1 rounded-full border border-white/25 bg-black/20 px-2.5 text-[10px] font-medium text-white/95 backdrop-blur-md">
+              <ShieldCheck className="size-3" aria-hidden />
+              <span className="bidi-ltr">OpenVPN</span>
+            </span>
+          </div>
+
+          <div className="relative mt-3 flex items-center gap-2.5">
+            <span className="flex size-12 shrink-0 items-center justify-center overflow-hidden rounded-2xl border border-white/35 bg-white/20 shadow-lg shadow-black/15 backdrop-blur-md">
+              <CountryFlag
+                countryCode={plan.countryCode}
+                title={plan.location}
+                className="text-[26px]"
+              />
+            </span>
+            <div className="min-w-0">
+              <h3
+                dir="auto"
+                className="line-clamp-2 min-h-[2.6em] text-[17px] font-extrabold leading-[1.3] drop-shadow-sm"
+              >
+                {title}
+              </h3>
+              <p dir="auto" className="mt-0.5 line-clamp-1 text-[11px] font-medium text-white/75">
+                {heroSubtitle}
+              </p>
+            </div>
+          </div>
+
+          <div className="relative mt-3 flex items-center justify-between gap-2 rounded-2xl border border-white/25 bg-white/15 py-1.5 pe-1.5 ps-3 shadow-lg shadow-black/10 backdrop-blur-xl">
+            <div className="min-w-0">
+              <span className="block text-[9px] font-semibold text-white/70">قیمت پلن</span>
+              <span className="text-[15.5px] font-extrabold tabular-nums text-white">
+                <bdi>{formatCurrency(plan.price, plan.currency)}</bdi>
+              </span>
+            </div>
+
+            <button
+              type="button"
+              disabled={unavailable}
+              onClick={() => onPurchase({ id: plan.id, title })}
+              aria-label={`خرید ${title}`}
+              className="flex h-9 shrink-0 items-center gap-1.5 rounded-xl border border-white/35 bg-white/25 px-3 text-[12px] font-bold text-white shadow-sm backdrop-blur-md transition-all duration-150 hover:bg-white/35 active:scale-95 disabled:cursor-not-allowed disabled:opacity-45"
+            >
+              <ShoppingBag className="size-3.5" aria-hidden />
+              {comingSoon ? 'به‌زودی' : unavailable ? fa.common.unavailable : fa.common.purchase}
+            </button>
+          </div>
+
+          {unavailable && !comingSoon ? (
+            <span className="absolute inset-0 z-10 flex items-center justify-center bg-black/55 text-[12px] font-bold text-white backdrop-blur-[2px]">
+              {fa.common.unavailable}
+            </span>
+          ) : null}
+        </div>
+
+        <div className="flex flex-1 flex-col p-3">
+          <p dir="auto" className="line-clamp-2 min-h-[2.6em] text-[11.5px] leading-snug text-tg-hint">
+            آی‌پی ثابت اختصاصی روی تونل امن OpenVPN (UDP) با تحویل تقریباً فوری.
+          </p>
+
+          <div className="mt-auto flex flex-wrap items-center gap-1.5 pt-2">
+            {plan.dataCapGb ? (
+              <Spec icon={Gauge}>{formatCount(plan.dataCapGb)} گیگابایت</Spec>
+            ) : null}
+            <Spec icon={Clock}>{formatCount(plan.durationDays)} روز</Spec>
+            <Spec icon={ShieldCheck}>IPv4 اختصاصی</Spec>
+          </div>
+        </div>
+      </article>
+    )
+  }
 
   return (
     <article
@@ -56,6 +174,7 @@ export function VpnOfferCard({ plan, onPurchase, className, style }: VpnOfferCar
           <span aria-hidden className="absolute -right-3 -top-4 size-10 rounded-full bg-white/20 blur-md" />
           <CountryFlag
             countryCode={plan.countryCode}
+            title={plan.location}
             className="relative text-[20px] font-semibold text-white"
           />
         </div>

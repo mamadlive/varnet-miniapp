@@ -381,9 +381,12 @@ export default function HomePage() {
                     />
                   ))}
                   {featuredPlans.map((plan) => (
-                    <div key={plan.id} className="w-[262px] shrink-0 snap-start">
-                      <VpnOfferCard plan={plan} onPurchase={handlePurchase} />
-                    </div>
+                    <VpnOfferCard
+                      key={plan.id}
+                      variant="featured"
+                      plan={plan}
+                      onPurchase={handlePurchase}
+                    />
                   ))}
                 </div>
               </div>
