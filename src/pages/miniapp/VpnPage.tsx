@@ -22,6 +22,7 @@ import { useTelegram } from '@/hooks/useTelegram'
 import { formatCount, formatDate } from '@/lib/format'
 import { fa } from '@/lib/i18n'
 import { cn } from '@/lib/utils'
+import { isApiError } from '@/services/apiClient'
 import { listPurchasedServices } from '@/services/staticIp.service'
 import { listVpnPlans, listVpnServers } from '@/services/vpn.service'
 import type { PurchasedStaticIpService, VpnPlan, VpnServer } from '@/types'
@@ -70,6 +71,7 @@ export default function VpnPage() {
   const [plansLoading, setPlansLoading] = useState(true)
   const [serversLoading, setServersLoading] = useState(true)
   const [servicesLoading, setServicesLoading] = useState(true)
+  const [servicesError, setServicesError] = useState<string | null>(null)
   const [loadFailed, setLoadFailed] = useState(false)
   const [reloadKey, setReloadKey] = useState(0)
   const [pendingPurchase, setPendingPurchase] = useState<VpnPlan | null>(null)
@@ -103,12 +105,18 @@ export default function VpnPage() {
         if (!cancelled) setServersLoading(false)
       })
 
+    setServicesLoading(true)
+    setServicesError(null)
     listPurchasedServices()
       .then((result) => {
         if (!cancelled) setServices(result)
       })
-      .catch(() => {
-        if (!cancelled) setServices([])
+      .catch((cause: unknown) => {
+        if (!cancelled) {
+          setServices([])
+          const message = cause instanceof Error ? cause.message : 'خواندن سرویس‌ها انجام نشد.'
+          setServicesError(isApiError(cause) && cause.code ? `${message} (${cause.code})` : message)
+        }
       })
       .finally(() => {
         if (!cancelled) setServicesLoading(false)
@@ -252,6 +260,13 @@ export default function VpnPage() {
               <ActiveServiceCardSkeleton />
               <ActiveServiceCardSkeleton />
             </div>
+          ) : servicesError ? (
+            <Card variant="surface" className="mt-4">
+              <p role="alert" className="text-[12px] text-tg-destructive">{servicesError}</p>
+              <Button size="sm" variant="secondary" className="mt-3" onClick={retryLoad}>
+                {fa.common.retry}
+              </Button>
+            </Card>
           ) : services.length === 0 ? (
             <Card variant="surface" padded={false} className="mt-4">
               <EmptyState
@@ -277,7 +292,7 @@ export default function VpnPage() {
                 <div>
                   <p className="text-[10px] text-tg-hint">سرویس فعال</p>
                   <p className="mt-0.5 text-[15px] font-bold tabular-nums text-tg-text">
-                    {formatCount(services.length)}
+                    {formatCount(services.filter((service) => service.status === 'completed' && service.access?.state !== 'suspended').length)}
                   </p>
                 </div>
                 <div>

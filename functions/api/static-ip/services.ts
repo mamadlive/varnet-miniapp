@@ -8,6 +8,7 @@
  */
 
 import { authenticateUser, userIdFor, type UserContext } from '../_lib/userAuth'
+import { readServiceAccess, type ServiceAccessState } from '../_lib/staticIpAccess'
 
 interface ServiceRow {
   id: string
@@ -60,19 +61,40 @@ export async function onRequestGet(context: UserContext): Promise<Response> {
     return failure(503, 'DB_UNAVAILABLE', 'خواندن سرویس‌های فعال از پایگاه داده انجام نشد.')
   }
 
+  // One access read per distinct order; index by order id.
+  const accessById = new Map<string, ServiceAccessState>()
+  for (const row of rows) {
+    if (accessById.has(row.id)) continue
+    const lookup = await readServiceAccess(db, row.id)
+    // A failed access read must not silently expose a suspended config.
+    if (!lookup.ok) {
+      return failure(503, 'DB_UNAVAILABLE', 'خواندن وضعیت سرویس‌ها از پایگاه داده انجام نشد.')
+    }
+    accessById.set(row.id, lookup.access)
+  }
+
   return jsonResponse({
     success: true,
-    data: rows.map((row) => ({
-      id: row.id,
-      orderId: row.id,
-      planName: row.product_title,
-      status: row.status,
-      deliveryNote: row.delivery_note,
-      amount: Number(row.total),
-      currency: 'IRT',
-      purchasedAt: row.created_at,
-      completedAt: row.created_at,
-    })),
+    data: rows.map((row) => {
+      const access = accessById.get(row.id)!
+      return {
+        id: row.id,
+        orderId: row.id,
+        planName: row.product_title,
+        status: row.status,
+        // Delivery notes are withheld while suspended.
+        deliveryNote: access.suspended ? null : row.delivery_note,
+        access: {
+          state: access.suspended ? 'suspended' : 'active',
+          reason: access.reason,
+          suspendedAt: access.suspendedAt,
+        },
+        amount: Number(row.total),
+        currency: 'IRT',
+        purchasedAt: row.created_at,
+        completedAt: row.created_at,
+      }
+    }),
     meta: { count: rows.length, limit: SERVICE_LIMIT },
   })
 }

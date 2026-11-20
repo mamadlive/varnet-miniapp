@@ -25,6 +25,7 @@ export interface D1PreparedStatement {
 
 export interface D1Database {
   prepare(sql: string): D1PreparedStatement
+  batch(statements: D1PreparedStatement[]): Promise<D1Result[]>
 }
 
 export interface UserEnv {

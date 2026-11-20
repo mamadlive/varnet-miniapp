@@ -201,14 +201,29 @@ export interface StaticIpPlan {
 /** A `vpn` order exposed to the customer as a service. */
 export type PurchasedStaticIpServiceStatus = 'pending' | 'paid' | 'completed'
 
+/**
+ * Administrative access state of a delivered static-IP service. Independent of
+ * the financial order status: suspension only withholds delivery/downloads.
+ */
+export type StaticIpServiceAccessState = 'active' | 'suspended'
+
+export interface StaticIpServiceAccess {
+  state: StaticIpServiceAccessState
+  /** Admin-entered suspension reason (Persian), shown to the customer. */
+  reason: string | null
+  suspendedAt: string | null
+}
+
 export interface PurchasedStaticIpService {
   id: string
   orderId: string
   planName: string
   /** Only `completed` services expose a downloadable config. */
   status: PurchasedStaticIpServiceStatus
-  /** Admin-recorded OpenVPN profile / credentials; null until completed with details. */
+  /** Admin-recorded OpenVPN profile / credentials; null until completed with details and withheld while suspended. */
   deliveryNote: string | null
+  /** Server-enforced access state (admin suspension). */
+  access?: StaticIpServiceAccess
   amount: number
   currency: Currency
   purchasedAt: string
@@ -277,6 +292,8 @@ export interface Order {
   paymentMethod?: PaymentMethod
   /** Account credentials / config text an admin attached on completion. */
   deliveryNote?: string
+  /** Static-IP access state (admin panel); active when no suspension is recorded. */
+  access?: { state: StaticIpServiceAccessState; reason?: string; updatedAt?: string }
   createdAt: string
   updatedAt: string
 }
@@ -353,6 +370,10 @@ export interface SupportTicket {
   id: string
   userId: string
   userName: string
+  /** Customer's Telegram id, denormalised so the admin can reply out-of-band. */
+  telegramId?: number | null
+  /** Optional order this ticket was opened for (warranty / after-sales). */
+  orderId?: string | null
   subject: string
   category: SupportTicketCategory
   status: SupportTicketStatus

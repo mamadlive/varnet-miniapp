@@ -1,6 +1,11 @@
 import { authenticateUser, userIdFor, type UserContext } from '../_lib/userAuth'
 import { createStaticIpDownloadToken, verifyStaticIpDownloadToken } from '../_lib/telegram'
 import { findOwnedConfig } from '../_lib/staticIpDelivery'
+import {
+  SERVICE_ACCESS_SUSPENDED,
+  SERVICE_SUSPENDED_MESSAGE,
+  readOwnedServiceAccess,
+} from '../_lib/staticIpAccess'
 
 const headers = {
   'cache-control': 'no-store',
@@ -27,8 +32,15 @@ export async function onRequestPost(context: UserContext): Promise<Response> {
   }
   const orderId = typeof body?.orderId === 'string' ? body.orderId.trim() : ''
   if (!orderId || orderId.length > 128) return failure(400, 'INVALID_ORDER', 'شناسه سفارش نامعتبر است.')
+  const userId = userIdFor(auth.user)
   try {
-    const note = await findOwnedConfig(db, orderId, userIdFor(auth.user))
+    // Suspension blocks minting new download links entirely.
+    const access = await readOwnedServiceAccess(db, orderId, userId)
+    if (!access.ok) return failure(503, 'DB_UNAVAILABLE', 'خواندن وضعیت سرویس از پایگاه داده انجام نشد.')
+    if (access.access.suspended) {
+      return failure(403, SERVICE_ACCESS_SUSPENDED, SERVICE_SUSPENDED_MESSAGE)
+    }
+    const note = await findOwnedConfig(db, orderId, userId)
     if (!note) return failure(404, 'CONFIG_NOT_FOUND', 'کانفیگ تحویل‌شده پیدا نشد.')
     const token = await createStaticIpDownloadToken(auth.user.id, orderId, botToken)
     return Response.json({ success: true, data: { token } }, { headers })
@@ -48,8 +60,15 @@ export async function onRequestGet(context: UserContext): Promise<Response> {
   if (!orderId || orderId.length > 128 || !token) return failure(400, 'INVALID_REQUEST', 'درخواست نامعتبر است.')
   const telegramId = await verifyStaticIpDownloadToken(token, orderId, botToken)
   if (!telegramId) return failure(401, 'DOWNLOAD_TOKEN_INVALID', 'لینک دانلود معتبر نیست یا منقضی شده است.')
+  const userId = `usr_tg_${telegramId}`
   try {
-    const note = await findOwnedConfig(db, orderId, `usr_tg_${telegramId}`)
+    // Tokens minted before a suspension must stop working too.
+    const access = await readOwnedServiceAccess(db, orderId, userId)
+    if (!access.ok) return failure(503, 'DB_UNAVAILABLE', 'خواندن وضعیت سرویس از پایگاه داده انجام نشد.')
+    if (access.access.suspended) {
+      return failure(403, SERVICE_ACCESS_SUSPENDED, SERVICE_SUSPENDED_MESSAGE)
+    }
+    const note = await findOwnedConfig(db, orderId, userId)
     if (!note) return failure(404, 'CONFIG_NOT_FOUND', 'کانفیگ تحویل‌شده پیدا نشد.')
     return new Response(note, { headers: {
       ...headers,

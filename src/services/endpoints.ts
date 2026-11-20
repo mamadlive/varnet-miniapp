@@ -25,6 +25,8 @@ export const endpoints = {
 
   /** Customer-side order history (real D1 rows). */
   orders: '/api/orders',
+  /** Customer-side support inbox (real D1 tickets + messages). */
+  support: '/api/support',
   /** Public card-to-card destination configured by the admin. */
   bank: '/api/bank',
 
@@ -60,6 +62,10 @@ export const endpoints = {
     /** Static-IP selling plan management (full CRUD). */
     staticIpPlans: '/api/admin/static-ip/plans',
     staticIpPlanAction: '/api/admin/static-ip/plans/action',
+    /** Suspend / reactivate a completed static-IP service (access, not billing). */
+    staticIpServiceAccess: '/api/admin/static-ip/services/access',
+    /** Support inbox shared with the Mini App (real D1 tickets). */
+    support: '/api/admin/support',
   },
 
   vpn: {

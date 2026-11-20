@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import {
   CheckCircle2,
   ChevronLeft,
@@ -20,8 +20,9 @@ import { Input } from '@/components/ui/Input'
 import { formatCount, formatDateTime } from '@/lib/format'
 import { fa } from '@/lib/i18n'
 import { cn } from '@/lib/utils'
-import { useAdminStore } from '@/store/adminStore'
-import type { SupportTicketStatus } from '@/types'
+import { listAdminTickets, replyToAdminTicket, setAdminTicketStatus } from '@/services/admin.service'
+import { isApiError } from '@/services/apiClient'
+import type { SupportTicket, SupportTicketStatus } from '@/types'
 
 type StatusFilter = 'all' | SupportTicketStatus
 
@@ -38,10 +39,39 @@ const STATUS_TONES: Record<SupportTicketStatus, BadgeTone> = {
   closed: 'neutral',
 }
 
+function describeFailure(cause: unknown, fallback: string): string {
+  if (isApiError(cause)) {
+    const message = cause.message.trim() || fallback
+    return cause.code ? `${message} (${cause.code})` : message
+  }
+  return cause instanceof Error && cause.message ? cause.message : fallback
+}
+
 export default function TicketsPage() {
-  const tickets = useAdminStore((state) => state.tickets)
-  const replyToTicket = useAdminStore((state) => state.replyToTicket)
-  const setTicketStatus = useAdminStore((state) => state.setTicketStatus)
+  const [tickets, setTickets] = useState<SupportTicket[]>([])
+  const [loading, setLoading] = useState(true)
+  const [loadError, setLoadError] = useState<string | null>(null)
+  const [reloadKey, setReloadKey] = useState(0)
+  const [writePending, setWritePending] = useState(false)
+  const writeLock = useRef(false)
+  const [writeError, setWriteError] = useState<string | null>(null)
+
+  useEffect(() => {
+    let cancelled = false
+    setLoading(true)
+    setLoadError(null)
+    listAdminTickets()
+      .then((next) => {
+        if (!cancelled) setTickets(next)
+      })
+      .catch((cause: unknown) => {
+        if (!cancelled) setLoadError(describeFailure(cause, 'خواندن تیکت‌ها انجام نشد.'))
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false)
+      })
+    return () => { cancelled = true }
+  }, [reloadKey])
 
   const [filter, setFilter] = useState<StatusFilter>('all')
   const [query, setQuery] = useState('')
@@ -65,23 +95,51 @@ export default function TicketsPage() {
   const openCount = tickets.filter((ticket) => ticket.status === 'open').length
   const selected = tickets.find((ticket) => ticket.id === selectedId) ?? filtered[0] ?? null
 
-  const showNotice = (message: string) => {
-    setNotice(message)
-    window.setTimeout(() => setNotice(null), 3200)
+  const handleReply = async () => {
+    if (!selected || reply.trim().length < 2 || writeLock.current || loading) return
+    writeLock.current = true
+    setWritePending(true)
+    setWriteError(null)
+    setNotice(null)
+    try {
+      const updated = await replyToAdminTicket(selected.id, reply)
+      // The reply response omits the joined customer name, so preserve it from the list.
+      setTickets((current) => current.map((ticket) =>
+        ticket.id === updated.id ? { ...updated, userName: ticket.userName } : ticket,
+      ))
+      setSelectedId(updated.id)
+      setReply('')
+      setNotice('پاسخ شما برای کاربر ثبت شد.')
+    } catch (cause) {
+      setWriteError(describeFailure(cause, 'ارسال پاسخ انجام نشد.'))
+    } finally {
+      writeLock.current = false
+      setWritePending(false)
+    }
   }
 
-  const handleReply = () => {
-    if (!selected || reply.trim().length < 2) return
-    replyToTicket(selected.id, reply, 'support')
-    setReply('')
-    showNotice('پاسخ شما برای کاربر ارسال شد.')
-  }
-
-  const toggleStatus = () => {
-    if (!selected) return
+  const toggleStatus = async () => {
+    if (!selected || writeLock.current || loading) return
     const next: SupportTicketStatus = selected.status === 'closed' ? 'open' : 'closed'
-    setTicketStatus(selected.id, next)
-    showNotice(next === 'closed' ? 'تیکت بسته شد.' : 'تیکت دوباره باز شد.')
+    writeLock.current = true
+    setWritePending(true)
+    setWriteError(null)
+    setNotice(null)
+    try {
+      const updated = await setAdminTicketStatus(selected.id, next)
+      setTickets((current) => current.map((ticket) =>
+        ticket.id === updated.ticketId
+          ? { ...ticket, status: updated.status, updatedAt: updated.updatedAt }
+          : ticket,
+      ))
+      setSelectedId(updated.ticketId)
+      setNotice(next === 'closed' ? 'تیکت بسته شد.' : 'تیکت دوباره باز شد.')
+    } catch (cause) {
+      setWriteError(describeFailure(cause, 'تغییر وضعیت تیکت انجام نشد.'))
+    } finally {
+      writeLock.current = false
+      setWritePending(false)
+    }
   }
 
   return (
@@ -96,6 +154,19 @@ export default function TicketsPage() {
           </Badge>
         }
       />
+
+      <div className="flex flex-wrap items-center gap-3">
+        <Button
+          variant="secondary"
+          size="sm"
+          disabled={loading || writePending}
+          onClick={() => setReloadKey((key) => key + 1)}
+          leftIcon={<RotateCcw className="size-3.5" aria-hidden />}
+        >
+          {loading ? 'در حال دریافت…' : loadError ? 'تلاش دوباره' : 'به‌روزرسانی'}
+        </Button>
+        {loadError ? <p role="alert" className="text-[12px] text-red-600">{loadError}</p> : null}
+      </div>
 
       <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
         <div className="flex flex-wrap gap-1.5">
@@ -139,7 +210,11 @@ export default function TicketsPage() {
 
       <div className="grid gap-4 xl:grid-cols-[minmax(0,23rem)_minmax(0,1fr)]">
         <Card padded={false} className="overflow-hidden">
-          {filtered.length === 0 ? (
+          {loading && tickets.length === 0 ? (
+            <p className="p-4 text-[12px] text-tg-hint" role="status">در حال دریافت تیکت‌ها…</p>
+          ) : loadError && tickets.length === 0 ? (
+            <p className="p-4 text-[12px] text-tg-hint">فهرست تیکت‌ها دریافت نشد.</p>
+          ) : filtered.length === 0 ? (
             <EmptyState
               icon={Headset}
               title="تیکتی یافت نشد"
@@ -154,9 +229,12 @@ export default function TicketsPage() {
                   <li key={ticket.id}>
                     <button
                       type="button"
+                      disabled={writePending}
                       onClick={() => {
                         setSelectedId(ticket.id)
                         setReply('')
+                        setWriteError(null)
+                        setNotice(null)
                       }}
                       className={cn(
                         'flex w-full items-start gap-2.5 px-4 py-3 text-start transition-colors',
@@ -204,11 +282,17 @@ export default function TicketsPage() {
                   {selected.userName} · {fa.ticketCategories[selected.category]} ·{' '}
                   <span className="bidi-ltr">{selected.id}</span>
                 </p>
+                {selected.orderId ? (
+                  <p className="mt-1 text-[11.5px] text-tg-hint">
+                    سفارش: <span className="bidi-ltr">{selected.orderId}</span>
+                  </p>
+                ) : null}
               </div>
 
               <Button
                 variant="secondary"
                 size="sm"
+                disabled={writePending || loading}
                 onClick={toggleStatus}
                 leftIcon={
                   selected.status === 'closed' ? (
@@ -252,12 +336,21 @@ export default function TicketsPage() {
               })}
             </div>
 
+            {writeError ? (
+              <p role="alert" className="border-t border-tg-separator px-4 py-2 text-[12px] text-red-600">
+                {writeError}
+              </p>
+            ) : null}
+            {notice && selected.status === 'closed' ? (
+              <p role="status" className="px-4 py-2 text-[11px] text-emerald-600">{notice}</p>
+            ) : null}
             {selected.status !== 'closed' ? (
               <div className="space-y-2 border-t border-tg-separator p-4">
                 <textarea
                   rows={3}
                   value={reply}
                   maxLength={1200}
+                  disabled={writePending}
                   onChange={(event) => setReply(event.target.value)}
                   placeholder="پاسخ خود را برای کاربر بنویسید…"
                   className="w-full resize-none rounded-xl border border-tg-separator bg-tg-bg px-3 py-2.5 text-[12.5px] leading-relaxed text-tg-text outline-none transition-colors placeholder:text-tg-hint/70 focus:border-brand-500"
@@ -276,7 +369,7 @@ export default function TicketsPage() {
                   <Button
                     size="sm"
                     onClick={handleReply}
-                    disabled={reply.trim().length < 2}
+                    disabled={reply.trim().length < 2 || writePending || loading}
                     leftIcon={<Send className="size-3.5" aria-hidden />}
                   >
                     ارسال پاسخ

@@ -52,6 +52,11 @@ beforeEach(() => {
   sqlite = new DatabaseSync(':memory:')
   for (const file of readdirSync(resolve(root, 'migrations')).filter(name => /^\d+.*\.sql$/.test(name)).sort()) sqlite.exec(readFileSync(resolve(root, 'migrations', file), 'utf8'))
   sqlite.prepare('INSERT INTO users (id, telegram_id, balance, created_at, updated_at) VALUES (?, ?, ?, ?, ?)').run('usr_tg_101', 101, 100000, '2025', '2025')
+  // 2 USDT × 25,000 Toman, with the configured 0% tier, is 50,000 Toman.
+  // A deliberately different stored price verifies provider pricing is used.
+  sqlite.prepare('INSERT INTO products (id, title, category, price, provider_price, provider_currency, stock, synced_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)').run('p1', 'Product', 'ai', 90000, 2, 'USDT', 10, '2025')
+  sqlite.prepare('INSERT INTO sync_meta (key, value, updated_at) VALUES (?, ?, ?)').run('usdt_rate', '25000', '2025')
+  sqlite.prepare('UPDATE settings SET value = ? WHERE key = ?').run(JSON.stringify([{ upToUsd: 1, percent: 25 }, { upToUsd: null, percent: 0 }]), 'margin_tiers')
   db = new FakeD1()
   calls = []; beforeBatch = undefined; failFetch = false
 })
@@ -70,6 +75,130 @@ async function submit(input = {}) {
 function count(table) { return sqlite.prepare(`SELECT COUNT(*) AS count FROM ${table}`).get().count }
 function balance() { return sqlite.prepare('SELECT balance FROM users WHERE telegram_id = 101').get().balance }
 
+test('server quote returns authoritative discounted price without creating an order', async () => {
+  code()
+  const { response, body } = await submit({ action: 'quote', paymentMethod: 'card', subtotal: 1, total: 1 })
+  assert.equal(response.status, 200)
+  assert.deepEqual(body.data, { title: 'Product', subtotal: 50000, discount: 10000, total: 40000, currency: 'IRT' })
+  assert.equal(count('orders'), 0)
+  assert.equal(count('payment_receipts'), 0)
+  assert.equal(count('wallet_transactions'), 0)
+  assert.equal(sqlite.prepare('SELECT used_count FROM discount_codes').get().used_count, 0)
+  assert.equal(balance(), 100000)
+  assert.equal(calls.length, 0)
+})
+
+test('quotes reject invalid coupons and unavailable products without side effects', async () => {
+  code({ used_count: 1 })
+  const exhausted = await submit({ action: 'quote' })
+  assert.equal(exhausted.response.status, 400)
+  assert.equal(exhausted.body.code, 'COUPON_EXHAUSTED')
+  const missing = await submit({ action: 'quote', couponCode: 'missing' })
+  assert.equal(missing.response.status, 400)
+  assert.equal(missing.body.code, 'COUPON_NOT_FOUND')
+  sqlite.exec("INSERT INTO product_overrides (product_id, is_deleted) VALUES ('p1', 1)")
+  const unavailable = await submit({ action: 'quote', couponCode: undefined })
+  assert.equal(unavailable.response.status, 404)
+  assert.equal(unavailable.body.code, 'PRODUCT_NOT_FOUND')
+  assert.equal(count('orders'), 0)
+  assert.equal(count('payment_receipts'), 0)
+  assert.equal(count('wallet_transactions'), 0)
+  assert.equal(balance(), 100000)
+  assert.equal(calls.length, 0)
+})
+
+test('pricing database errors and invalid settings fail closed', async () => {
+  code()
+  sqlite.prepare('UPDATE settings SET value = ? WHERE key = ?').run('invalid JSON', 'margin_tiers')
+  const malformed = await submit({ action: 'quote' })
+  assert.equal(malformed.response.status, 503)
+  assert.equal(malformed.body.code, 'DB_UNAVAILABLE')
+  const originalDb = db
+  db = {
+    prepare(sql) {
+      if (sql.includes('FROM settings')) throw new Error('simulated D1 failure')
+      return originalDb.prepare(sql)
+    },
+    batch: (...args) => originalDb.batch(...args),
+  }
+  const unavailable = await submit({ action: 'quote' })
+  assert.equal(unavailable.response.status, 503)
+  assert.equal(unavailable.body.code, 'DB_UNAVAILABLE')
+  assert.equal(count('orders'), 0)
+  assert.equal(count('payment_receipts'), 0)
+  assert.equal(count('wallet_transactions'), 0)
+  assert.equal(balance(), 100000)
+  assert.equal(calls.length, 0)
+})
+
+test('tampered account claims return authoritative totals without side effects', async () => {
+  code()
+  for (const claimed of [
+    { subtotal: 1000, discount: 200, total: 800 },
+    { subtotal: 50000, discount: 20000, total: 30000 },
+    { subtotal: 50000, discount: 10000, total: 1 },
+  ]) {
+    const { response, body } = await submit({ ...claimed, title: 'Client title' })
+    assert.equal(response.status, 409)
+    assert.equal(body.code, 'PRICE_CHANGED')
+    assert.deepEqual(body.data, { title: 'Product', subtotal: 50000, discount: 10000, total: 40000, currency: 'IRT' })
+  }
+  assert.equal(balance(), 100000)
+  assert.equal(count('orders'), 0)
+  assert.equal(count('wallet_transactions'), 0)
+  assert.equal(count('payment_receipts'), 0)
+  assert.equal(sqlite.prepare('SELECT used_count FROM discount_codes').get().used_count, 0)
+  assert.equal(calls.length, 0)
+})
+
+test('VPN plan price and name come from D1, not the request or node', async () => {
+  // Seeded Frankfurt plan costs 120,000; its node costs 150,000.
+  const input = { productId: 'plan_fra_10g_1m', kind: 'vpn', title: 'Client title', couponCode: undefined, subtotal: 50000, discount: 0, total: 50000 }
+  const stale = await submit(input)
+  assert.equal(stale.response.status, 409)
+  assert.equal(stale.body.code, 'PRICE_CHANGED')
+  assert.deepEqual(stale.body.data, { title: 'پلن ۱۰ گیگابایت · ۱ ماهه', subtotal: 120000, discount: 0, total: 120000, currency: 'IRT' })
+  assert.equal(count('orders'), 0)
+  assert.equal(count('wallet_transactions'), 0)
+  assert.equal(count('payment_receipts'), 0)
+  assert.equal(balance(), 100000)
+  assert.equal(calls.length, 0)
+
+  sqlite.exec('UPDATE users SET balance = 200000 WHERE telegram_id = 101')
+  const { response, body } = await submit({ ...input, subtotal: 120000, total: 120000 })
+  assert.equal(response.status, 200, JSON.stringify(body))
+  assert.equal(body.data.order.title, 'پلن ۱۰ گیگابایت · ۱ ماهه')
+  assert.equal(body.data.order.subtotal, 120000)
+  assert.equal(body.data.order.total, 120000)
+  assert.equal(balance(), 80000)
+  const order = sqlite.prepare('SELECT product_id, product_title, kind, subtotal, total FROM orders').get()
+  assert.deepEqual({ ...order }, { product_id: 'plan_fra_10g_1m', product_title: 'پلن ۱۰ گیگابایت · ۱ ماهه', kind: 'vpn', subtotal: 120000, total: 120000 })
+})
+
+test('deleted accounts and disabled, unavailable or missing VPN plans cannot be purchased', async () => {
+  code()
+  const scenarios = [
+    { sql: "INSERT INTO product_overrides (product_id, is_deleted) VALUES ('p1', 1)", input: {}, status: 404, code: 'PRODUCT_NOT_FOUND' },
+    { sql: "DELETE FROM products WHERE id = 'p1'", input: {}, status: 404, code: 'PRODUCT_NOT_FOUND' },
+    { sql: "UPDATE static_ip_plans SET is_enabled = 0 WHERE id = 'plan_fra_10g_1m'", input: { productId: 'plan_fra_10g_1m', kind: 'vpn' }, status: 409, code: 'PRODUCT_UNAVAILABLE' },
+    { sql: "UPDATE static_ip_plans SET is_enabled = 1 WHERE id = 'plan_fra_10g_1m'; UPDATE static_ip_nodes SET is_enabled = 0 WHERE id = 'node_fra'", input: { productId: 'plan_fra_10g_1m', kind: 'vpn' }, status: 409, code: 'PRODUCT_UNAVAILABLE' },
+    { sql: "UPDATE static_ip_nodes SET is_enabled = 1, availability = 'sold_out' WHERE id = 'node_fra'", input: { productId: 'plan_fra_10g_1m', kind: 'vpn' }, status: 409, code: 'PRODUCT_UNAVAILABLE' },
+    { sql: "DELETE FROM static_ip_plans WHERE id = 'plan_fra_10g_1m'", input: { productId: 'plan_fra_10g_1m', kind: 'vpn' }, status: 404, code: 'PRODUCT_NOT_FOUND' },
+  ]
+  for (const scenario of scenarios) {
+    sqlite.exec(scenario.sql)
+    const { response, body } = await submit(scenario.input)
+    assert.equal(response.status, scenario.status, scenario.sql)
+    assert.equal(body.code, scenario.code, scenario.sql)
+    assert.equal(balance(), 100000)
+    assert.equal(count('orders'), 0)
+    assert.equal(count('wallet_transactions'), 0)
+    assert.equal(count('payment_receipts'), 0)
+    assert.equal(sqlite.prepare('SELECT used_count FROM discount_codes').get().used_count, 0)
+    assert.equal(calls.length, 0)
+  }
+})
+
 test('wallet purchase redeems a valid coupon atomically and notifies after commit', async () => {
   code()
   const { response, body } = await submit()
@@ -79,31 +208,42 @@ test('wallet purchase redeems a valid coupon atomically and notifies after commi
   assert.equal(count('wallet_transactions'), 1)
   assert.equal(sqlite.prepare('SELECT used_count FROM discount_codes').get().used_count, 1)
   assert.equal(body.data.balance, 60000)
+  assert.deepEqual({ title: body.data.order.title, subtotal: body.data.order.subtotal, discount: body.data.order.discount, total: body.data.order.total }, { title: 'Product', subtotal: 50000, discount: 10000, total: 40000 })
+  const order = sqlite.prepare('SELECT product_title, subtotal, discount, total, coupon_code FROM orders').get()
+  assert.deepEqual({ ...order }, { product_title: 'Product', subtotal: 50000, discount: 10000, total: 40000, coupon_code: 'SAVE20' })
   assert.equal(body.data.notification.sent, true)
   assert.equal(calls.length, 1)
   assert.equal(calls[0].inTransaction, false)
   assert.match(calls[0].payload.text, /Product/)
   assert.match(calls[0].payload.text, /کیف پول/)
   const next = await submit()
-  assert.equal(next.response.status, 409)
+  assert.equal(next.response.status, 400)
+  assert.equal(next.body.code, 'COUPON_EXHAUSTED')
   assert.equal(balance(), 60000)
   assert.equal(count('orders'), 1)
 })
 
 test('disabled, expired, exhausted, minimum, and tampered discounts do not create an order or debit', async () => {
-  for (const fields of [
-    { is_active: 0 }, { expires_at: '2020-01-01T00:00:00.000Z' },
-    { used_count: 1 }, { min_subtotal: 60000 }, { value: 30 },
+  for (const { fields, status, errorCode } of [
+    { fields: { is_active: 0 }, status: 400, errorCode: 'COUPON_INACTIVE' },
+    { fields: { expires_at: '2020-01-01T00:00:00.000Z' }, status: 400, errorCode: 'COUPON_EXPIRED' },
+    { fields: { used_count: 1 }, status: 400, errorCode: 'COUPON_EXHAUSTED' },
+    { fields: { min_subtotal: 60000 }, status: 400, errorCode: 'COUPON_MIN_SUBTOTAL' },
+    { fields: { value: 30 }, status: 409, errorCode: 'PRICE_CHANGED' },
   ]) {
     sqlite.exec('DELETE FROM discount_codes')
     code(fields)
-    const { response } = await submit()
-    assert.equal(response.status, 409, JSON.stringify(fields))
+    const { response, body } = await submit()
+    assert.equal(response.status, status, JSON.stringify(fields))
+    assert.equal(body.code, errorCode, JSON.stringify(fields))
     assert.equal(balance(), 100000)
     assert.equal(count('orders'), 0)
     assert.equal(count('wallet_transactions'), 0)
   }
-  assert.equal((await submit({ couponCode: undefined })).response.status, 400)
+  const missingCoupon = await submit({ couponCode: undefined })
+  assert.equal(missingCoupon.response.status, 409)
+  assert.equal(missingCoupon.body.code, 'PRICE_CHANGED')
+  assert.deepEqual(missingCoupon.body.data, { title: 'Product', subtotal: 50000, discount: 0, total: 50000, currency: 'IRT' })
   assert.equal(calls.length, 0)
 })
 
@@ -138,7 +278,9 @@ test('expiry uses database time when the transaction starts', async () => {
 
 test('full discount creates only a valid free wallet order', async () => {
   code({ value: 100 })
-  assert.equal((await submit({ subtotal: 0, discount: 0, total: 0, couponCode: undefined })).response.status, 400)
+  const tampered = await submit({ subtotal: 0, discount: 0, total: 0, couponCode: undefined })
+  assert.equal(tampered.response.status, 409)
+  assert.equal(tampered.body.code, 'PRICE_CHANGED')
   assert.equal((await submit({ discount: 50000, total: 0, paymentMethod: 'card', receiptReference: '123456' })).response.status, 400)
   assert.equal(count('orders'), 0)
   const { response, body } = await submit({ discount: 50000, total: 0 })
@@ -156,8 +298,16 @@ test('card orders reserve coupon once without debiting and report notification f
   assert.equal(response.status, 200, JSON.stringify(body))
   assert.equal(body.data.notification.sent, false)
   assert.equal(body.data.order.status, 'pending')
+  assert.equal(body.data.order.subtotal, 50000)
+  assert.equal(body.data.order.discount, 10000)
+  assert.equal(body.data.order.total, 40000)
   assert.equal(balance(), 100000)
+  assert.equal(count('orders'), 1)
+  const order = sqlite.prepare('SELECT subtotal, discount, total, coupon_code FROM orders').get()
+  assert.deepEqual({ ...order }, { subtotal: 50000, discount: 10000, total: 40000, coupon_code: 'SAVE20' })
   assert.equal(count('payment_receipts'), 1)
+  const receipt = sqlite.prepare('SELECT amount, reference, status FROM payment_receipts').get()
+  assert.deepEqual({ ...receipt }, { amount: 40000, reference: '123456', status: 'PENDING' })
   assert.equal(count('wallet_transactions'), 0)
   assert.equal(sqlite.prepare('SELECT used_count FROM discount_codes').get().used_count, 1)
   assert.match(calls[0].payload.text, /کارت به کارت/)

@@ -11,7 +11,7 @@ import { build } from 'esbuild'
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 const BOT = 'test:secret-token'
 const ADMIN = 999, ROLE_ADMIN = 998, BUYER = 101
-let receipt, orders, review, helper, sqlite, db, calls, reply, onSend
+let receipt, orders, review, helper, sqlite, db, calls, reply, onSend, beforeBatch
 const originalFetch = globalThis.fetch
 const originalWarn = console.warn
 let logs
@@ -27,6 +27,7 @@ class FakeD1 {
   constructor(database) { this.database = database }
   prepare(sql) { return new Statement(this.database, sql) }
   async batch(statements) {
+    if (beforeBatch) { beforeBatch(); beforeBatch = undefined }
     this.database.exec('BEGIN')
     try {
       const results = []
@@ -80,7 +81,7 @@ beforeEach(() => {
   for (const file of readdirSync(resolve(root, 'migrations')).filter(name => /^\d+.*\.sql$/.test(name)).sort()) sqlite.exec(readFileSync(resolve(root, 'migrations', file), 'utf8'))
   db = new FakeD1(sqlite)
   for (const id of [BUYER, ADMIN, ROLE_ADMIN]) sqlite.prepare('INSERT INTO users (id,telegram_id,created_at,updated_at,role) VALUES (?,?,?,?,?)').run(`usr_tg_${id}`, id, '2025', '2025', id === ROLE_ADMIN ? 'admin' : 'user')
-  calls = []; logs = []; onSend = undefined; reply = { status: 200, body: { ok: true } }
+  calls = []; logs = []; onSend = undefined; beforeBatch = undefined; reply = { status: 200, body: { ok: true } }
 })
 
 test('receipt commits before notifying deduplicated configured admins', async () => {
@@ -128,6 +129,36 @@ test('rejection accurately distinguishes unpaid and refunded and retries do not 
   assert.equal(calls.length, 2)
   assert.equal(sqlite.prepare('SELECT balance FROM users WHERE telegram_id = ?').get(BUYER).balance, 25000)
   assert.equal(sqlite.prepare("SELECT COUNT(*) AS n FROM wallet_transactions WHERE type = 'refund'").get().n, 1)
+})
+
+test('rejection does not refund or notify if the order changes before the batch', async () => {
+  for (const [id, status, change] of [
+    ['became-completed', 'paid', "status = 'completed'"],
+    ['became-paid', 'pending', "status = 'paid'"],
+    ['became-provisioning', 'paid', "status = 'provisioning'"],
+    ['changed-total', 'paid', 'total = 30000'],
+  ]) {
+    addOrder(id, status)
+    beforeBatch = () => sqlite.prepare(`UPDATE orders SET ${change} WHERE id = ?`).run(id)
+    const response = await orders.onRequestPost({ request: req({ orderId: id, action: 'reject', rejectReason: 'not available' }, true), env: env() })
+    const body = await response.json()
+    assert.equal(response.status, 409, id)
+    assert.equal(body.code, 'ORDER_STATE_CHANGED', id)
+    assert.equal(sqlite.prepare('SELECT balance FROM users WHERE telegram_id = ?').get(BUYER).balance, 0, id)
+    assert.equal(sqlite.prepare("SELECT COUNT(*) AS n FROM wallet_transactions WHERE type = 'refund'").get().n, 0, id)
+    assert.equal(calls.length, 0, id)
+  }
+})
+
+test('a failed rejection batch rolls back the refund and does not notify', async () => {
+  addOrder('rollback', 'paid')
+  sqlite.exec("CREATE TRIGGER fail_order_rejection BEFORE UPDATE ON orders WHEN NEW.status = 'refunded' BEGIN SELECT RAISE(ABORT, 'simulated failure'); END")
+  const response = await orders.onRequestPost({ request: req({ orderId: 'rollback', action: 'reject', rejectReason: 'not available' }, true), env: env() })
+  assert.equal(response.status, 500)
+  assert.equal(sqlite.prepare('SELECT status FROM orders WHERE id = ?').get('rollback').status, 'paid')
+  assert.equal(sqlite.prepare('SELECT balance FROM users WHERE telegram_id = ?').get(BUYER).balance, 0)
+  assert.equal(sqlite.prepare("SELECT COUNT(*) AS n FROM wallet_transactions WHERE type = 'refund'").get().n, 0)
+  assert.equal(calls.length, 0)
 })
 
 test('approved product receipt notifies buyer after commit without retrying a failed send', async () => {

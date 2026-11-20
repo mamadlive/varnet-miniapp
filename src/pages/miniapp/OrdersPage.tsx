@@ -185,7 +185,15 @@ export default function OrdersPage() {
       ) : (
         <div className="space-y-3">
           {filteredOrders.map((order) => (
-            <OrderCard key={order.id} order={order} onSelect={handleSelect} />
+            <OrderCard
+              key={order.id}
+              order={order}
+              onSelect={handleSelect}
+              onSupport={(selected) => {
+                haptic()
+                navigate(`/app/support?orderId=${encodeURIComponent(selected.id)}`)
+              }}
+            />
           ))}
         </div>
       )}

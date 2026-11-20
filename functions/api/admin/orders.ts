@@ -30,6 +30,9 @@ interface OrderRow {
   last_name: string | null
   username: string | null
   telegram_id: number | null
+  access_state: string | null
+  access_reason: string | null
+  access_updated_at: string | null
 }
 
 const ORDER_LIMIT = 500
@@ -46,9 +49,11 @@ export async function onRequestGet(context: PagesContext): Promise<Response> {
         `SELECT o.id, o.user_id, o.product_id, o.product_title, o.kind, o.quantity,
                 o.subtotal, o.discount, o.total, o.status, o.payment_method,
                 o.delivery_note, o.created_at,
-                u.first_name, u.last_name, u.username, u.telegram_id
+                u.first_name, u.last_name, u.username, u.telegram_id,
+                s.state AS access_state, s.reason AS access_reason, s.updated_at AS access_updated_at
          FROM orders o
          LEFT JOIN users u ON u.id = o.user_id
+         LEFT JOIN static_ip_service_access s ON s.order_id = o.id
          ORDER BY o.created_at DESC
          LIMIT ?`,
       )
@@ -85,6 +90,10 @@ export async function onRequestGet(context: PagesContext): Promise<Response> {
         kind: row.kind === 'vpn' ? 'vpn' : 'account',
         paymentMethod: row.payment_method === 'card' ? 'card' : 'wallet',
         deliveryNote: row.delivery_note ?? undefined,
+        // Access state is separate from the financial status (suspension never changes it).
+        access: row.access_state === 'suspended'
+          ? { state: 'suspended' as const, reason: row.access_reason ?? undefined, updatedAt: row.access_updated_at ?? undefined }
+          : { state: 'active' as const },
         createdAt: row.created_at,
         updatedAt: row.created_at,
       }

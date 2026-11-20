@@ -16,12 +16,16 @@
  *                             `wrangler pages dev` testing only — leave unset
  *                             in production.
  *
- * Prices are integer Toman. The catalogue and its admin margins live in the
- * Mini App today, so the server records the submitted amounts but validates
- * their consistency (`subtotal - discount === total`) and sane bounds.
+ * Prices are integer Toman and authoritative on the server: account products
+ * are repriced from D1 (`sync_meta` rate + `settings.margin_tiers`) and VPN
+ * plans use `static_ip_plans.price`. The coupon is evaluated against that
+ * server subtotal, so a tampered client amount cannot lower the charge — a
+ * mismatch is answered with `PRICE_CHANGED` plus the real totals.
  */
 
+import { evaluateDiscount, findDiscountCode } from './_lib/discounts'
 import { notifyPurchaseAdmins } from './_lib/notifications'
+import { accountSubtotal, loadPricingContext } from './_lib/pricing'
 
 interface D1Meta {
   changes?: number
@@ -36,6 +40,7 @@ interface D1Result {
 interface D1PreparedStatement {
   bind(...values: unknown[]): D1PreparedStatement
   first<T = unknown>(): Promise<T | null>
+  all<T = unknown>(): Promise<{ results: T[] }>
   run(): Promise<D1Result>
 }
 
@@ -68,6 +73,7 @@ type AuthResult =
   | { ok: false; status: number; code: string; message: string }
 
 interface PurchaseBody {
+  action?: unknown
   productId?: unknown
   title?: unknown
   kind?: unknown
@@ -266,16 +272,39 @@ function couponGuardValues(code: string | undefined, subtotal: number, discount:
 /* Body validation                                                            */
 /* -------------------------------------------------------------------------- */
 
-interface ValidatedPurchase {
+interface ParsedPurchase {
+  quote: boolean
   productId: string
-  title: string
   kind: 'account' | 'vpn'
-  subtotal: number
-  discount: number
-  total: number
   couponCode?: string
   paymentMethod: 'wallet' | 'card'
   receiptReference?: string
+  /** Amounts claimed by the client; used only to detect a stale price. */
+  claimed: { subtotal: number; discount: number; total: number } | null
+}
+
+interface ResolvedOffer {
+  title: string
+  subtotal: number
+}
+
+type ResolveResult =
+  | { ok: true; offer: ResolvedOffer }
+  | { ok: false; status: number; code: string; message: string }
+
+interface VpnPlanRow {
+  name: string
+  price: number
+  is_enabled: number
+  node_enabled: number
+  availability: string
+}
+
+interface AccountRow {
+  title: string
+  price: number
+  provider_price: number | null
+  provider_currency: string | null
 }
 
 function readString(value: unknown, maxLength: number): string | null {
@@ -289,48 +318,29 @@ function readInteger(value: unknown): number | null {
   return typeof value === 'number' && Number.isInteger(value) ? value : null
 }
 
-function validateBody(body: PurchaseBody): { ok: true; value: ValidatedPurchase } | { ok: false; message: string } {
+function parsePurchase(body: PurchaseBody): { ok: true; value: ParsedPurchase } | { ok: false; message: string } {
   const productId = readString(body.productId, 128)
-  const title = readString(body.title, 200)
-  if (!productId || !title) return { ok: false, message: 'شناسه یا عنوان محصول نامعتبر است.' }
+  if (!productId) return { ok: false, message: 'شناسه محصول نامعتبر است.' }
 
+  if (body.action !== undefined && body.action !== 'quote') return { ok: false, message: 'عملیات خرید نامعتبر است.' }
+  const quote = body.action === 'quote'
   const kind = body.kind === 'vpn' ? 'vpn' : 'account'
-  const subtotal = readInteger(body.subtotal)
-  const discount = readInteger(body.discount ?? 0)
-  const total = readInteger(body.total)
-
-  if (subtotal === null || discount === null || total === null) {
-    return { ok: false, message: 'مبلغ سفارش نامعتبر است.' }
-  }
-  if (subtotal <= 0 || subtotal > MAX_AMOUNT_TOMAN) {
-    return { ok: false, message: 'مبلغ محصول خارج از محدوده مجاز است.' }
-  }
-  if (discount < 0 || discount > subtotal) {
-    return { ok: false, message: 'مبلغ تخفیف نامعتبر است.' }
-  }
-  if (total < 0 || total !== subtotal - discount) {
-    return { ok: false, message: 'مبلغ قابل پرداخت با جمع سفارش هم‌خوانی ندارد.' }
-  }
   if (body.currency !== undefined && body.currency !== 'IRT') {
     return { ok: false, message: 'واحد پول سفارش پشتیبانی نمی‌شود.' }
   }
 
   let couponCode: string | undefined
-  if (body.couponCode !== undefined) {
+  if (body.couponCode !== undefined && body.couponCode !== null && body.couponCode !== '') {
     const parsedCoupon = readString(body.couponCode, 64)
     if (!parsedCoupon || !/^[A-Za-z0-9_-]{3,24}$/.test(parsedCoupon)) {
       return { ok: false, message: 'کد تخفیف نامعتبر است.' }
     }
     couponCode = parsedCoupon.toUpperCase()
   }
-  if ((!couponCode && discount !== 0) || (couponCode && discount === 0)) {
-    return { ok: false, message: 'مبلغ تخفیف با کد واردشده مطابقت ندارد.' }
-  }
 
   const paymentMethod = body.paymentMethod === 'card' ? 'card' : 'wallet'
   let receiptReference: string | undefined
-  if (paymentMethod === 'card') {
-    if (total === 0) return { ok: false, message: 'برای سفارش رایگان، روش کیف پول را انتخاب کنید.' }
+  if (paymentMethod === 'card' && !quote) {
     const reference = readString(body.receiptReference, 64)
     if (!reference || reference.length < 4) {
       return { ok: false, message: 'شماره پیگیری واریز را کامل وارد کنید.' }
@@ -338,10 +348,78 @@ function validateBody(body: PurchaseBody): { ok: true; value: ValidatedPurchase 
     receiptReference = reference
   }
 
+  const subtotal = readInteger(body.subtotal)
+  const discount = readInteger(body.discount ?? 0)
+  const total = readInteger(body.total)
+  const claimed =
+    subtotal !== null && discount !== null && total !== null
+      ? { subtotal, discount, total }
+      : null
+
   return {
     ok: true,
-    value: { productId, title, kind, subtotal, discount, total, couponCode, paymentMethod, receiptReference },
+    value: { quote, productId, kind, couponCode, paymentMethod, receiptReference, claimed },
   }
+}
+
+const UNAVAILABLE: ResolveResult = {
+  ok: false,
+  status: 409,
+  code: 'PRODUCT_UNAVAILABLE',
+  message: 'این محصول در حال حاضر قابل خرید نیست.',
+}
+
+/** Authoritative price for the purchased offer, read from D1. */
+async function resolveOffer(
+  db: D1Database,
+  productId: string,
+  kind: 'account' | 'vpn',
+): Promise<ResolveResult> {
+  if (kind === 'vpn') {
+    const plan = await db
+      .prepare(
+        `SELECT p.name, p.price, p.is_enabled, n.is_enabled AS node_enabled, n.availability
+         FROM static_ip_plans p
+         JOIN static_ip_nodes n ON n.id = p.node_id
+         WHERE p.id = ?`,
+      )
+      .bind(productId)
+      .first<VpnPlanRow>()
+    if (!plan) {
+      return { ok: false, status: 404, code: 'PRODUCT_NOT_FOUND', message: 'پلن آی‌پی ثابت پیدا نشد.' }
+    }
+    if (
+      Number(plan.is_enabled) !== 1 ||
+      Number(plan.node_enabled) !== 1 ||
+      plan.availability !== 'in_stock'
+    ) {
+      return UNAVAILABLE
+    }
+    const subtotal = Number(plan.price)
+    if (!Number.isSafeInteger(subtotal) || subtotal <= 0 || subtotal > MAX_AMOUNT_TOMAN) {
+      return UNAVAILABLE
+    }
+    return { ok: true, offer: { title: plan.name, subtotal } }
+  }
+
+  const row = await db
+    .prepare(
+      `SELECT products.title, products.price, products.provider_price, products.provider_currency
+       FROM products
+       LEFT JOIN product_overrides ON product_overrides.product_id = products.id
+       WHERE products.id = ? AND COALESCE(product_overrides.is_deleted, 0) = 0`,
+    )
+    .bind(productId)
+    .first<AccountRow>()
+  if (!row) {
+    return { ok: false, status: 404, code: 'PRODUCT_NOT_FOUND', message: 'محصول پیدا نشد.' }
+  }
+
+  const subtotal = accountSubtotal(row, await loadPricingContext(db))
+  if (!Number.isSafeInteger(subtotal) || subtotal <= 0 || subtotal > MAX_AMOUNT_TOMAN) {
+    return UNAVAILABLE
+  }
+  return { ok: true, offer: { title: row.title, subtotal } }
 }
 
 /* -------------------------------------------------------------------------- */
@@ -380,19 +458,49 @@ export async function onRequestPost(context: PagesContext): Promise<Response> {
     return failure(400, 'PURCHASE_BAD_REQUEST', 'ساختار درخواست خرید نامعتبر است.')
   }
 
-  const validated = validateBody(body)
-  if (!validated.ok) return failure(400, 'PURCHASE_VALIDATION', validated.message)
-  const {
-    productId,
-    title,
-    kind,
-    subtotal,
-    discount,
-    total,
-    couponCode,
-    paymentMethod,
-    receiptReference,
-  } = validated.value
+  const parsed = parsePurchase(body)
+  if (!parsed.ok) return failure(400, 'PURCHASE_VALIDATION', parsed.message)
+  const { quote, productId, kind, couponCode, paymentMethod, receiptReference, claimed } = parsed.value
+
+  let resolved: ResolveResult
+  try {
+    resolved = await resolveOffer(db, productId, kind)
+  } catch {
+    return failure(503, 'DB_UNAVAILABLE', 'خواندن قیمت محصول از پایگاه داده انجام نشد. دوباره تلاش کنید.')
+  }
+  if (!resolved.ok) return failure(resolved.status, resolved.code, resolved.message)
+  const { title, subtotal } = resolved.offer
+
+  let discount = 0
+  if (couponCode) {
+    let evaluated: ReturnType<typeof evaluateDiscount>
+    try {
+      evaluated = evaluateDiscount(await findDiscountCode(db, couponCode), subtotal)
+    } catch {
+      return failure(503, 'DB_UNAVAILABLE', 'بررسی کد تخفیف انجام نشد. دوباره تلاش کنید.')
+    }
+    if (!evaluated.ok) {
+      return failure(evaluated.status, evaluated.code, evaluated.message, { subtotal, currency: 'IRT' })
+    }
+    discount = evaluated.discount
+  }
+  const total = subtotal - discount
+  if (quote) return jsonResponse({ success: true, data: { title, subtotal, discount, total, currency: 'IRT' } })
+
+  if (
+    claimed &&
+    (claimed.subtotal !== subtotal || claimed.discount !== discount || claimed.total !== total)
+  ) {
+    return failure(
+      409,
+      'PRICE_CHANGED',
+      'قیمت یا تخفیف این سفارش به‌روز شده است؛ مبلغ جدید را بررسی و دوباره تایید کنید.',
+      { title, subtotal, discount, total, currency: 'IRT' },
+    )
+  }
+  if (paymentMethod === 'card' && total === 0) {
+    return failure(400, 'PURCHASE_VALIDATION', 'برای سفارش رایگان، روش کیف پول را انتخاب کنید.')
+  }
 
   const now = new Date().toISOString()
   const userId = userIdFor(auth.user)

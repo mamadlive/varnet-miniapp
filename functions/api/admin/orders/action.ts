@@ -252,57 +252,53 @@ async function rejectOrder(
 ): Promise<Response> {
   const db = context.env.DB!
   const now = new Date().toISOString()
+  if (!['pending', 'paid', 'provisioning'].includes(order.status)) {
+    return failure(409, 'ORDER_STATE_CHANGED', 'این سفارش دیگر قابل رد نیست؛ فهرست را به‌روز کنید.')
+  }
+
   const refundTotal = order.status === 'paid' || order.status === 'provisioning' ? Number(order.total) : 0
   const refundTxId = `txn_${crypto.randomUUID()}`
   const rejectionNote = `دلیل رد سفارش: ${reason}`
-
-  const batch = [
-    db
-      .prepare(
-        `UPDATE orders
-         SET status = 'refunded', delivery_note = ?
-         WHERE id = ? AND status IN ('pending', 'paid', 'provisioning')`,
-      )
-      .bind(rejectionNote, order.id),
-  ]
+  const batch = []
 
   if (refundTotal > 0) {
     batch.push(
       db
         .prepare(
-          `UPDATE users SET balance = balance + ?, updated_at = ?
-           WHERE id = ?
-             AND NOT EXISTS (
-               SELECT 1 FROM wallet_transactions WHERE type = 'refund' AND reference = ?
-             )`,
-        )
-        .bind(refundTotal, now, order.user_id, order.id),
-      db
-        .prepare(
           `INSERT INTO wallet_transactions
              (id, user_id, type, amount, balance_after, currency, description, reference, created_at)
-           SELECT ?, ?, 'refund', ?, balance, 'IRT', ?, ?, ?
-           FROM users
-           WHERE id = ?
+           SELECT ?, u.id, 'refund', ?, u.balance + ?, 'IRT', ?, o.id, ?
+           FROM users u JOIN orders o ON o.user_id = u.id
+           WHERE u.id = ? AND o.id = ? AND o.status = ? AND o.total = ?
              AND NOT EXISTS (
-               SELECT 1 FROM wallet_transactions WHERE type = 'refund' AND reference = ?
+               SELECT 1 FROM wallet_transactions WHERE type = 'refund' AND reference = o.id
              )`,
         )
-        .bind(
-          refundTxId,
-          order.user_id,
-          refundTotal,
-          `بازگشت وجه سفارش ${order.product_title}`,
-          order.id,
-          now,
-          order.user_id,
-          order.id,
-        ),
+        .bind(refundTxId, refundTotal, refundTotal, `بازگشت وجه سفارش ${order.product_title}`,
+          now, order.user_id, order.id, order.status, order.total),
+      db
+        .prepare(
+          `UPDATE users SET balance = balance + ?, updated_at = ?
+           WHERE id = ? AND EXISTS (
+             SELECT 1 FROM wallet_transactions WHERE id = ? AND user_id = ? AND reference = ?
+           )`,
+        )
+        .bind(refundTotal, now, order.user_id, refundTxId, order.user_id, order.id),
     )
   }
 
+  batch.push(
+    db
+      .prepare(
+        `UPDATE orders SET status = 'refunded', delivery_note = ?
+         WHERE id = ? AND status = ? AND total = ?
+           AND (? = 0 OR EXISTS (SELECT 1 FROM wallet_transactions WHERE id = ? AND reference = ?))`,
+      )
+      .bind(rejectionNote, order.id, order.status, order.total, refundTotal, refundTxId, order.id),
+  )
+
   const results = await db.batch(batch)
-  if ((results[0]?.meta?.changes ?? 0) !== 1) {
+  if ((results.at(-1)?.meta?.changes ?? 0) !== 1) {
     return failure(409, 'ORDER_STATE_CHANGED', 'این سفارش دیگر قابل رد نیست؛ فهرست را به‌روز کنید.')
   }
 

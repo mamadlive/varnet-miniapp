@@ -60,6 +60,7 @@ interface OrderRow {
   status: string
   payment_method: string | null
   delivery_note: string | null
+  access_state: string | null
   created_at: string
 }
 
@@ -141,7 +142,7 @@ function toOrder(row: OrderRow): unknown {
     status: row.status,
     kind: row.kind === 'vpn' ? 'vpn' : 'account',
     paymentMethod: row.payment_method === 'card' ? 'card' : 'wallet',
-    deliveryNote: row.delivery_note ?? undefined,
+    deliveryNote: row.kind === 'vpn' && row.access_state === 'suspended' ? undefined : row.delivery_note ?? undefined,
     createdAt: row.created_at,
     updatedAt: row.created_at,
   }
@@ -158,11 +159,13 @@ export async function onRequestGet(context: PagesContext): Promise<Response> {
   try {
     const result = await db
       .prepare(
-        `SELECT id, user_id, product_id, product_title, kind, quantity, subtotal, discount,
-                total, currency, status, payment_method, delivery_note, created_at
-         FROM orders
-         WHERE user_id = ?
-         ORDER BY created_at DESC
+        `SELECT o.id, o.user_id, o.product_id, o.product_title, o.kind, o.quantity, o.subtotal, o.discount,
+                o.total, o.currency, o.status, o.payment_method, o.delivery_note, o.created_at,
+                s.state AS access_state
+         FROM orders o
+         LEFT JOIN static_ip_service_access s ON s.order_id = o.id
+         WHERE o.user_id = ?
+         ORDER BY o.created_at DESC
          LIMIT ?`,
       )
       .bind(userIdFor(auth.user), ORDER_LIMIT)

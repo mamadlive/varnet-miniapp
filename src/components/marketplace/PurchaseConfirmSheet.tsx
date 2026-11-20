@@ -22,7 +22,7 @@ import { isApiError } from '@/services/apiClient'
 import { validateCoupon } from '@/services/coupons.service'
 import type { CouponValidation } from '@/services/coupons.service'
 import { fetchBankDetails } from '@/services/payments.service'
-import { purchaseProduct } from '@/services/purchase.service'
+import { purchaseProduct, quoteProduct } from '@/services/purchase.service'
 import { useAuthStore } from '@/store/authStore'
 import { useWalletStore } from '@/store/walletStore'
 import type { AccountProduct, BankAccountDetails, Currency, OrderKind, PaymentMethod } from '@/types'
@@ -98,6 +98,9 @@ export function PurchaseConfirmSheet({
   const couponInputId = useId()
 
   const [couponState, setCouponState] = useState<CouponState | null>(null)
+  const [updatedPrice, setUpdatedPrice] = useState<{ productId: string; original: number; subtotal: number; couponCode: string | null } | null>(null)
+  const [quoteError, setQuoteError] = useState<{ message: string; code?: string } | null>(null)
+  const [quoteKey, setQuoteKey] = useState(0)
   const [submitting, setSubmitting] = useState(false)
   const [submitError, setSubmitError] = useState<{ message: string; code?: string } | null>(null)
   const [method, setMethod] = useState<PaymentMethod>('wallet')
@@ -112,6 +115,8 @@ export function PurchaseConfirmSheet({
     if (!isOpen) return
     setMethod('wallet')
     setReference('')
+    setUpdatedPrice(null)
+    setQuoteError(null)
     setSubmitError(null)
   }, [isOpen, target?.id])
 
@@ -151,9 +156,39 @@ export function PurchaseConfirmSheet({
     }))
   }
 
+  const subtotal = updatedPrice && updatedPrice.productId === target?.id && updatedPrice.original === price
+    ? updatedPrice.subtotal
+    : price
+  const appliedCode = coupon.applied?.coupon.code ?? null
+  const quoteReady = Boolean(updatedPrice && updatedPrice.productId === target?.id &&
+    updatedPrice.original === price && updatedPrice.couponCode === appliedCode)
+
+  useEffect(() => {
+    if (!isOpen || !target) return
+    let cancelled = false
+    setQuoteError(null)
+    quoteProduct({ productId: target.id, kind, couponCode: appliedCode ?? undefined })
+      .then((quote) => {
+        if (cancelled) return
+        setUpdatedPrice({ productId: target.id, original: price, subtotal: quote.subtotal, couponCode: appliedCode })
+        if (appliedCode) {
+          setCouponState((current) => current?.productId === target.id && current.applied?.coupon.code === appliedCode
+            ? { ...current, applied: { ...current.applied, discount: quote.discount, total: quote.total } }
+            : current)
+        }
+      })
+      .catch((cause: unknown) => {
+        if (!cancelled) setQuoteError({
+          message: cause instanceof Error ? cause.message : 'دریافت قیمت از سرور انجام نشد.',
+          code: isApiError(cause) ? cause.code : undefined,
+        })
+      })
+    return () => { cancelled = true }
+  }, [isOpen, target?.id, kind, price, appliedCode, quoteKey])
+
   const discount = coupon.applied?.discount ?? 0
-  const total = Math.max(price - discount, 0)
-  const subtotalLabel = formatCurrency(price, currency)
+  const total = Math.max(subtotal - discount, 0)
+  const subtotalLabel = formatCurrency(subtotal, currency)
   const totalLabel = formatCurrency(total, currency)
 
   const handleApplyCoupon = async () => {
@@ -161,7 +196,7 @@ export function PurchaseConfirmSheet({
     const productId = target.id
     updateCoupon({ checking: true, error: null })
     try {
-      const result = await validateCoupon(coupon.code, price)
+      const result = await validateCoupon(coupon.code, subtotal)
       setCouponState((prev) => ({
         ...(prev ?? { productId, ...EMPTY_COUPON }),
         productId,
@@ -170,6 +205,7 @@ export function PurchaseConfirmSheet({
         error: null,
         checking: false,
       }))
+      setReference('')
       haptic('light')
     } catch (cause) {
       updateCoupon({
@@ -183,11 +219,12 @@ export function PurchaseConfirmSheet({
   const removeCoupon = () => {
     haptic('light')
     setSubmitError(null)
+    setReference('')
     updateCoupon(EMPTY_COUPON)
   }
 
   const handleConfirm = async () => {
-    if (!target || submitting) return
+    if (!target || submitting || !quoteReady || quoteError) return
 
     const trimmedReference = reference.trim()
     if (method === 'card' && trimmedReference.length < 4) {
@@ -208,7 +245,7 @@ export function PurchaseConfirmSheet({
         productId: target.id,
         title: target.title,
         kind,
-        subtotal: price,
+        subtotal,
         discount,
         total,
         currency,
@@ -226,20 +263,32 @@ export function PurchaseConfirmSheet({
       haptic('medium')
       notify('success')
       onConfirm(target, {
-        subtotal: price,
-        discount,
-        total,
-        currency,
+        subtotal: receipt.order.subtotal,
+        discount: receipt.order.discount,
+        total: receipt.order.total,
+        currency: receipt.order.currency,
         coupon: coupon.applied?.coupon,
         paymentMethod: method,
         pending: method === 'card',
       })
     } catch (cause) {
+      if (isApiError(cause) && cause.code === 'PRICE_CHANGED') {
+        const data = (cause.details as { data?: { subtotal?: unknown; discount?: unknown; total?: unknown } } | undefined)?.data
+        if (typeof data?.subtotal === 'number' && Number.isSafeInteger(data.subtotal) && data.subtotal > 0 &&
+            typeof data.discount === 'number' && Number.isSafeInteger(data.discount) && data.discount >= 0 &&
+            data.discount <= data.subtotal && data.total === data.subtotal - data.discount) {
+          setUpdatedPrice({ productId: target.id, original: price, subtotal: data.subtotal, couponCode: appliedCode })
+          if (coupon.applied) updateCoupon({ applied: { ...coupon.applied, discount: data.discount, total: data.total } })
+          if (method === 'card') setReference('')
+        }
+      }
       if (isApiError(cause) && cause.code === 'COUPON_INVALID') {
         updateCoupon({ applied: null, error: cause.message })
       }
       setSubmitError({
-        message: cause instanceof Error ? cause.message : 'پرداخت انجام نشد. دوباره تلاش کنید.',
+        message: isApiError(cause) && cause.code === 'PRICE_CHANGED' && method === 'card'
+          ? `${cause.message} اگر قبلاً واریز کرده‌اید، پیش از واریز مجدد با پشتیبانی تماس بگیرید.`
+          : cause instanceof Error ? cause.message : 'پرداخت انجام نشد. دوباره تلاش کنید.',
         code: isApiError(cause) ? cause.code : undefined,
       })
       haptic('heavy')
@@ -260,7 +309,7 @@ export function PurchaseConfirmSheet({
         open={isOpen}
         onClose={handleCancel}
         title={fa.marketplace.purchaseConfirmTitle}
-        description={fa.marketplace.purchaseNote}
+        description={method === 'card' ? 'سفارش پس از ثبت فیش در انتظار بررسی پشتیبانی خواهد بود.' : fa.marketplace.purchaseNote}
         className={cn('max-h-[90dvh] overflow-y-auto', className)}
         footer={
           <div className="flex flex-col gap-2">
@@ -283,11 +332,17 @@ export function PurchaseConfirmSheet({
               </div>
             ) : null}
 
+            {quoteError ? (
+              <div role="alert" className="rounded-2xl border border-red-500/25 bg-red-500/10 p-3 text-[12px] text-red-600">
+                <p>{quoteError.message} {quoteError.code ? `(${quoteError.code})` : null}</p>
+                <Button variant="secondary" size="sm" onClick={() => setQuoteKey((key) => key + 1)}>تلاش دوباره</Button>
+              </div>
+            ) : !quoteReady ? <p role="status" className="text-[12px] text-tg-hint">در حال دریافت قیمت از سرور…</p> : null}
             <Button
               fullWidth
               size="lg"
               loading={submitting}
-              disabled={price <= 0 || (method === 'card' && (total === 0 || bankError !== null))}
+              disabled={!quoteReady || quoteError !== null || subtotal <= 0 || (method === 'card' && (total === 0 || bankLoading || bankError !== null || !bank))}
               onClick={handleConfirm}
               leftIcon={
                 method === 'card' ? (
@@ -474,7 +529,9 @@ export function PurchaseConfirmSheet({
               </div>
             </div>
 
-            {method === 'card' && total === 0 ? (
+            {method === 'card' && !quoteReady ? (
+              <p className="text-[12px] text-tg-hint">پیش از واریز، منتظر دریافت قیمت از سرور بمانید.</p>
+            ) : method === 'card' && total === 0 ? (
               <p className="text-[12px] text-tg-hint">برای سفارش رایگان، روش کیف پول را انتخاب کنید.</p>
             ) : method === 'card' ? (
               <div className="space-y-2.5 rounded-2xl border border-dashed border-brand-500/40 bg-brand-500/[0.06] p-3.5">

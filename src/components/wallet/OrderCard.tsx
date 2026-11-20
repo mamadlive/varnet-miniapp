@@ -1,7 +1,8 @@
 import type { KeyboardEvent } from 'react'
-import { ChevronLeft, Package, Shield } from 'lucide-react'
+import { ChevronLeft, LifeBuoy, Package, Shield } from 'lucide-react'
 
 import { Badge } from '@/components/ui/Badge'
+import { Button } from '@/components/ui/Button'
 import { Card } from '@/components/ui/Card'
 import { OrderStatusBadge } from '@/components/wallet/OrderStatusBadge'
 import { formatCount, formatCurrency, formatDateTime } from '@/lib/format'
@@ -13,11 +14,13 @@ export interface OrderCardProps {
   order: Order
   /** When provided the card becomes an interactive button (opens details). */
   onSelect?: (order: Order) => void
+  /** Opens a warranty/support ticket pre-linked to this order. */
+  onSupport?: (order: Order) => void
   className?: string
 }
 
 /** Compact order summary used in the Mini App order history. */
-export function OrderCard({ order, onSelect, className }: OrderCardProps) {
+export function OrderCard({ order, onSelect, onSupport, className }: OrderCardProps) {
   const KindIcon = order.kind === 'vpn' ? Shield : Package
   const itemCount = order.items.length
   const summary = order.items.map((item) => item.title).join(' · ') || 'اقلام سفارش'
@@ -31,18 +34,15 @@ export function OrderCard({ order, onSelect, className }: OrderCardProps) {
   }
 
   return (
-    <Card
-      variant="surface"
-      padded={false}
-      interactive={Boolean(onSelect)}
-      role={onSelect ? 'button' : undefined}
-      aria-label={onSelect ? `جزئیات سفارش ${order.id}` : undefined}
-      tabIndex={onSelect ? 0 : undefined}
-      onClick={onSelect ? () => onSelect(order) : undefined}
-      onKeyDown={onSelect ? handleKeyDown : undefined}
-      className={cn('overflow-hidden', className)}
-    >
-      <div className="flex items-start gap-3 p-4">
+    <Card variant="surface" padded={false} className={cn('overflow-hidden', className)}>
+      <div
+        role={onSelect ? 'button' : undefined}
+        aria-label={onSelect ? `جزئیات سفارش ${order.id}` : undefined}
+        tabIndex={onSelect ? 0 : undefined}
+        onClick={onSelect ? () => onSelect(order) : undefined}
+        onKeyDown={onSelect ? handleKeyDown : undefined}
+        className={cn('flex items-start gap-3 p-4', onSelect && 'cursor-pointer')}
+      >
         <span
           className={cn(
             'flex size-10 shrink-0 items-center justify-center rounded-xl',
@@ -76,9 +76,25 @@ export function OrderCard({ order, onSelect, className }: OrderCardProps) {
         <Badge tone={order.kind === 'vpn' ? 'info' : 'brand'} size="sm">
           {fa.orderKinds[order.kind]}
         </Badge>
-        <p className="text-[15px] font-semibold tabular-nums text-tg-text">
-          {formatCurrency(order.total, order.currency)}
-        </p>
+        <div className="flex items-center gap-2">
+          {onSupport ? (
+            <Button
+              variant="ghost"
+              size="sm"
+              className="min-h-11 gap-1 px-2 text-[11px]"
+              leftIcon={<LifeBuoy className="size-3.5" aria-hidden />}
+              onClick={(event) => {
+                event.stopPropagation()
+                onSupport(order)
+              }}
+            >
+              پشتیبانی / گارانتی
+            </Button>
+          ) : null}
+          <p className="text-[15px] font-semibold tabular-nums text-tg-text">
+            {formatCurrency(order.total, order.currency)}
+          </p>
+        </div>
       </div>
     </Card>
   )

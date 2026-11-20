@@ -55,10 +55,10 @@ export function ProductQuickView({ product, onClose, onPurchase }: ProductQuickV
           >
             {outOfStock
               ? fa.common.soldOut
-              : `پرداخت از کیف پول · ${formatCurrency(product.price, product.currency)}`}
+              : `ادامه خرید · ${formatCurrency(product.price, product.currency)}`}
           </Button>
           <p className="text-center text-[11px] text-tg-hint">
-            موجودی کیف پول هنگام پرداخت بررسی می‌شود. تحویل بلافاصله پس از پرداخت انجام می‌شود.
+            در مرحله بعد روش پرداخت را انتخاب کنید.
           </p>
         </div>
       }

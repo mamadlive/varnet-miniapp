@@ -13,6 +13,8 @@ import type {
   StaticIpNode,
   StaticIpNodeAvailability,
   StaticIpPlan,
+  SupportTicket,
+  SupportTicketStatus,
   User,
 } from '@/types'
 
@@ -53,6 +55,47 @@ async function adminGet<T>(url: string): Promise<T> {
   const payload = await apiGetProxy<AdminEnvelope<T>>(url, { headers: adminHeaders() })
   if (!payload || payload.success !== true || payload.data === undefined) {
     throw adminFailure(payload, 'پاسخ سرور مدیریتی نامعتبر بود.')
+  }
+  return payload.data
+}
+
+export async function listAdminTickets(): Promise<SupportTicket[]> {
+  const tickets = await adminGet<SupportTicket[]>(endpoints.admin.support)
+  if (!Array.isArray(tickets)) throw new ApiError('فهرست تیکت‌های دریافتی نامعتبر بود.')
+  return tickets
+}
+
+export async function replyToAdminTicket(ticketId: string, body: string): Promise<SupportTicket> {
+  const payload = await apiPostProxy<AdminEnvelope<SupportTicket>>(
+    endpoints.admin.support,
+    { action: 'reply', ticketId, body },
+    { headers: adminHeaders() },
+  )
+  if (!payload || payload.success !== true || !payload.data || payload.data.id !== ticketId ||
+      !Array.isArray(payload.data.messages)) {
+    throw adminFailure(payload, 'ارسال پاسخ تیکت انجام نشد.')
+  }
+  return payload.data
+}
+
+export interface AdminTicketStatusResult {
+  ticketId: string
+  status: SupportTicketStatus
+  updatedAt: string
+}
+
+export async function setAdminTicketStatus(
+  ticketId: string,
+  status: SupportTicketStatus,
+): Promise<AdminTicketStatusResult> {
+  const payload = await apiPostProxy<AdminEnvelope<AdminTicketStatusResult>>(
+    endpoints.admin.support,
+    { action: 'status', ticketId, status },
+    { headers: adminHeaders() },
+  )
+  if (!payload || payload.success !== true || !payload.data || payload.data.ticketId !== ticketId ||
+      payload.data.status !== status || typeof payload.data.updatedAt !== 'string') {
+    throw adminFailure(payload, 'تغییر وضعیت تیکت انجام نشد.')
   }
   return payload.data
 }
@@ -194,6 +237,37 @@ export async function actOnOrder(
   )
   if (!payload || payload.success !== true || !payload.data) {
     throw adminFailure(payload, 'اقدام روی سفارش انجام نشد.')
+  }
+  return payload.data
+}
+
+/** Suspend an access state; the financial order status is never changed. */
+export type ServiceAccessAction = 'suspend' | 'reactivate'
+
+export interface ServiceAccessResult {
+  orderId: string
+  access: { state: 'active' | 'suspended'; reason: string | null; updatedAt: string }
+  /**
+   * Always false: there is no server-side RADIUS/OpenVPN revoke integration, so
+   * already-delivered credentials and live tunnels are NOT cut off.
+   */
+  networkRevoked: boolean
+}
+
+export async function actOnServiceAccess(
+  orderId: string,
+  action: ServiceAccessAction,
+  reason?: string,
+): Promise<ServiceAccessResult> {
+  const payload = await apiPostProxy<AdminEnvelope<ServiceAccessResult>>(
+    endpoints.admin.staticIpServiceAccess,
+    { orderId, action, ...(reason ? { reason } : {}) },
+    { headers: adminHeaders() },
+  )
+  if (!payload || payload.success !== true || !payload.data) {
+    throw adminFailure(payload, action === 'suspend'
+      ? 'تعلیق سرویس انجام نشد.'
+      : 'فعال‌سازی مجدد سرویس انجام نشد.')
   }
   return payload.data
 }

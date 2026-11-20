@@ -47,7 +47,7 @@ export default function MarketplacePage() {
   const [reloadKey, setReloadKey] = useState(0)
   const [selectedProduct, setSelectedProduct] = useState<AccountProduct | null>(null)
   const [pendingPurchase, setPendingPurchase] = useState<PendingPurchase | null>(null)
-  const [toast, setToast] = useState<PurchaseTarget | null>(null)
+  const [toast, setToast] = useState<(PurchaseTarget & { pending?: boolean }) | null>(null)
   const toastTimer = useRef<number | null>(null)
 
   useEffect(() => {
@@ -123,9 +123,9 @@ export default function MarketplacePage() {
     setSelectedProduct(null)
   }, [])
 
-  const handlePurchaseConfirm = useCallback((target: PurchaseTarget) => {
+  const handlePurchaseConfirm = useCallback((target: PurchaseTarget, summary: { pending?: boolean }) => {
     setPendingPurchase(null)
-    setToast(target)
+    setToast({ ...target, pending: summary.pending })
     if (toastTimer.current !== null) window.clearTimeout(toastTimer.current)
     toastTimer.current = window.setTimeout(() => setToast(null), 3000)
   }, [])
@@ -286,7 +286,7 @@ export default function MarketplacePage() {
             className="flex max-w-full animate-slide-up items-center gap-2 rounded-full bg-tg-button px-4 py-2.5 text-[12px] font-medium text-tg-button-text shadow-lg shadow-black/20"
           >
             <CheckCircle2 className="size-4 shrink-0" aria-hidden />
-            <span className="truncate">{fa.marketplace.purchaseSuccess(toast.title)}</span>
+            <span className="truncate">{toast.pending ? `فیش ${toast.title} در انتظار بررسی است.` : fa.marketplace.purchaseSuccess(toast.title)}</span>
           </div>
         </div>
       ) : null}

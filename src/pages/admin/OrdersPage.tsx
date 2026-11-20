@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { CheckCircle2, ReceiptText, RefreshCw, Search, Undo2 } from 'lucide-react'
+import { CheckCircle2, ReceiptText, RefreshCw, Search, ShieldOff, Undo2, Unlock } from 'lucide-react'
 import { AdminErrorState } from '@/components/admin/AdminStates'
 import { AdminPageHeader } from '@/components/admin/AdminPageHeader'
 import { DataTable } from '@/components/admin/AdminTable'
@@ -14,8 +14,8 @@ import { Input } from '@/components/ui/Input'
 import { Sheet } from '@/components/ui/Sheet'
 import { formatCount, formatCurrency, formatDateTime } from '@/lib/format'
 import { fa } from '@/lib/i18n'
-import { actOnOrder, listAdminOrders } from '@/services/admin.service'
-import type { OrderAction } from '@/services/admin.service'
+import { actOnOrder, actOnServiceAccess, listAdminOrders } from '@/services/admin.service'
+import type { OrderAction, ServiceAccessAction } from '@/services/admin.service'
 import type { Order, OrderStatus } from '@/types'
 
 type StatusFilter = OrderStatus | 'all'
@@ -23,6 +23,11 @@ type StatusFilter = OrderStatus | 'all'
 interface ActionState {
   order: Order
   action: OrderAction
+}
+
+interface AccessState {
+  order: Order
+  action: ServiceAccessAction
 }
 
 const STATUS_ORDER: OrderStatus[] = [
@@ -42,9 +47,22 @@ function canReject(order: Order): boolean {
   return order.status === 'pending' || order.status === 'paid' || order.status === 'provisioning'
 }
 
+/**
+ * Only completed VPN services carry deliverable credentials, so only they can
+ * be suspended. Non-VPN orders have no service access state.
+ */
+function canManageAccess(order: Order): boolean {
+  return order.kind === 'vpn' && order.status === 'completed'
+}
+
+function isSuspended(order: Order): boolean {
+  return order.access?.state === 'suspended'
+}
+
 function buildColumns(
   onComplete: (order: Order) => void,
   onReject: (order: Order) => void,
+  onToggleAccess: (order: Order) => void,
 ): DataTableColumn<Order>[] {
   return [
     {
@@ -121,7 +139,16 @@ function buildColumns(
     {
       key: 'status',
       header: 'وضعیت',
-      render: (order) => <OrderStatusBadge status={order.status} />,
+      render: (order) => (
+        <div className="flex flex-col items-start gap-1">
+          <OrderStatusBadge status={order.status} />
+          {isSuspended(order) ? (
+            <Badge tone="danger" size="sm" title={order.access?.reason}>
+              دسترسی معلق
+            </Badge>
+          ) : null}
+        </div>
+      ),
     },
     {
       key: 'created',
@@ -160,7 +187,30 @@ function buildColumns(
               رد و بازگشت وجه
             </Button>
           ) : null}
-          {!canComplete(order) && !canReject(order) ? (
+          {canManageAccess(order) ? (
+            isSuspended(order) ? (
+              <Button
+                variant="ghost"
+                size="sm"
+                className="h-8 px-2 text-[11.5px] text-emerald-600 hover:bg-emerald-500/10"
+                leftIcon={<Unlock className="size-3.5" />}
+                onClick={() => onToggleAccess(order)}
+              >
+                فعال‌سازی سرویس
+              </Button>
+            ) : (
+              <Button
+                variant="ghost"
+                size="sm"
+                className="h-8 px-2 text-[11.5px] text-amber-600 hover:bg-amber-500/10"
+                leftIcon={<ShieldOff className="size-3.5" />}
+                onClick={() => onToggleAccess(order)}
+              >
+                تعلیق سرویس
+              </Button>
+            )
+          ) : null}
+          {!canComplete(order) && !canReject(order) && !canManageAccess(order) ? (
             <span className="text-[11px] text-tg-hint">—</span>
           ) : null}
         </div>
@@ -181,6 +231,10 @@ export default function OrdersPage() {
   const [actionBusy, setActionBusy] = useState(false)
   const [feedback, setFeedback] = useState<string | null>(null)
   const [feedbackWarning, setFeedbackWarning] = useState(false)
+  const [accessState, setAccessState] = useState<AccessState | null>(null)
+  const [accessReason, setAccessReason] = useState('')
+  const [accessError, setAccessError] = useState<string | null>(null)
+  const [accessBusy, setAccessBusy] = useState(false)
 
   const load = useCallback(async () => {
     try {
@@ -228,7 +282,51 @@ export default function OrdersPage() {
     setActionState({ order, action: 'reject' })
   }
 
-  const columns = useMemo(() => buildColumns(openComplete, openReject), [])
+  const openAccess = (order: Order) => {
+    setAccessError(null)
+    setAccessReason('')
+    setAccessState({ order, action: isSuspended(order) ? 'reactivate' : 'suspend' })
+  }
+
+  const columns = useMemo(() => buildColumns(openComplete, openReject, openAccess), [])
+
+  const closeAccess = () => {
+    if (accessBusy) return
+    setAccessState(null)
+    setAccessError(null)
+  }
+
+  const submitAccess = async () => {
+    if (!accessState || accessBusy) return
+    const reason = accessReason.trim()
+    if (accessState.action === 'suspend' && reason.length < 3) {
+      setAccessError('دلیل تعلیق سرویس را وارد کنید (حداقل ۳ حرف).')
+      return
+    }
+    setAccessBusy(true)
+    setAccessError(null)
+    setFeedback(null)
+    try {
+      const result = await actOnServiceAccess(
+        accessState.order.id,
+        accessState.action,
+        accessState.action === 'suspend' ? reason : undefined,
+      )
+      setFeedbackWarning(false)
+      setFeedback(
+        accessState.action === 'suspend'
+          ? 'سرویس معلق شد؛ دانلود و ارسال مجدد کانفیگ برای مشتری غیرفعال است و وضعیت مالی سفارش تغییر نکرد.'
+          : 'دسترسی سرویس دوباره فعال شد و دانلود کانفیگ برای مشتری باز شد.',
+      )
+      setAccessState(null)
+      refresh()
+      return result
+    } catch (cause) {
+      setAccessError(cause instanceof Error ? cause.message : 'تغییر دسترسی سرویس انجام نشد.')
+    } finally {
+      setAccessBusy(false)
+    }
+  }
 
   const closeAction = () => {
     if (actionBusy) return
@@ -488,6 +586,86 @@ export default function OrdersPage() {
             </p>
             <p className="text-[11.5px] leading-relaxed text-tg-hint">
               سفارش‌های کارت به کارت در انتظار تایید، پرداختی نداشته‌اند و فقط لغو می‌شوند.
+            </p>
+          </div>
+        )}
+      </Sheet>
+
+      <Sheet
+        open={accessState !== null}
+        onClose={closeAccess}
+        title={accessState?.action === 'reactivate' ? 'فعال‌سازی دسترسی سرویس' : 'تعلیق دسترسی سرویس'}
+        description={
+          accessState
+            ? `سفارش ${accessState.order.id} · ${accessState.order.items.map((item) => item.title).join(' · ')}`
+            : undefined
+        }
+        footer={
+          <div className="flex flex-col gap-2">
+            {accessError ? (
+              <p className="rounded-xl border border-red-500/25 bg-red-500/10 p-2.5 text-[12px] font-medium text-red-600 dark:text-red-400">
+                {accessError}
+              </p>
+            ) : null}
+            <Button
+              fullWidth
+              size="lg"
+              loading={accessBusy}
+              onClick={() => void submitAccess()}
+              leftIcon={
+                accessState?.action === 'reactivate' ? (
+                  <Unlock className="size-4" />
+                ) : (
+                  <ShieldOff className="size-4" />
+                )
+              }
+            >
+              {accessState?.action === 'reactivate'
+                ? 'فعال‌سازی مجدد دسترسی'
+                : 'تعلیق دسترسی سرویس'}
+            </Button>
+            <Button fullWidth variant="secondary" disabled={accessBusy} onClick={closeAccess}>
+              {fa.common.cancel}
+            </Button>
+          </div>
+        }
+      >
+        {accessState?.action === 'reactivate' ? (
+          <div className="space-y-2">
+            <p className="text-[13px] leading-relaxed text-tg-text">
+              با فعال‌سازی مجدد، وضعیت سرویس به «فعال» برمی‌گردد و مشتری بلافاصله می‌تواند
+              کانفیگ را دانلود یا دوباره دریافت کند.
+            </p>
+            {accessState.order.access?.reason ? (
+              <p className="text-[11.5px] leading-relaxed text-tg-hint">
+                دلیل تعلیق قبلی: {accessState.order.access.reason}
+              </p>
+            ) : null}
+          </div>
+        ) : (
+          <div className="space-y-2">
+            <label htmlFor="service-suspend-reason" className="block text-[13px] font-medium text-tg-hint">
+              دلیل تعلیق (برای مشتری نمایش داده و ارسال می‌شود)
+            </label>
+            <textarea
+              id="service-suspend-reason"
+              value={accessReason}
+              onChange={(event) => {
+                setAccessReason(event.target.value)
+                setAccessError(null)
+              }}
+              rows={4}
+              maxLength={500}
+              placeholder="مثلاً استفاده تجاری خارج از شرایط سرویس یا بازگشت وجه بانکی."
+              className="w-full rounded-xl border border-tg-separator bg-tg-bg p-3 text-[12.5px] leading-relaxed text-tg-text outline-none focus:border-brand-500"
+            />
+            <p className="text-[11.5px] leading-relaxed text-tg-hint">
+              در مدت تعلیق، دانلود کانفیگ، لینک‌های صادرشده و ارسال مجدد برای مشتری مسدود
+              می‌شود. این اقدام وضعیت مالی سفارش را تغییر نمی‌دهد.
+            </p>
+            <p className="text-[11px] leading-relaxed text-amber-700 dark:text-amber-400">
+              توجه: تونل OpenVPN و اطلاعاتی که قبلاً تحویل داده شده در سطح شبکه قطع نمی‌شود؛
+              برای قطع واقعی اتصال باید سرویس VPN نیز مسدود شود.
             </p>
           </div>
         )}

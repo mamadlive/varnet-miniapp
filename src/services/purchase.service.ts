@@ -41,6 +41,14 @@ export interface PurchaseOrder {
   createdAt: string
 }
 
+export interface PurchaseQuote {
+  title: string
+  subtotal: number
+  discount: number
+  total: number
+  currency: Currency
+}
+
 export interface PurchaseReceipt {
   order: PurchaseOrder
   /** Wallet balance after the request, straight from D1. */
@@ -56,6 +64,24 @@ interface PurchaseEnvelope {
     order?: PurchaseOrder
     balance?: number
     receipt?: { id: string; status: 'PENDING' }
+  }
+}
+
+export async function quoteProduct(input: { productId: string; kind: OrderKind; couponCode?: string }): Promise<PurchaseQuote> {
+  const initData = getTelegramInitData()
+  try {
+    const { data } = await axios.post<{ success?: boolean; data?: PurchaseQuote; message?: string; code?: string }>(
+      '/api/purchase', { action: 'quote', ...input },
+      { timeout: env.apiTimeoutMs, headers: initData ? { 'X-Telegram-Init-Data': initData } : undefined },
+    )
+    if (data.success !== true || !data.data || !Number.isSafeInteger(data.data.subtotal) ||
+        data.data.subtotal <= 0 || !Number.isSafeInteger(data.data.discount) || data.data.discount < 0 ||
+        data.data.total !== data.data.subtotal - data.data.discount || data.data.total < 0) {
+      throw new ApiError(data.message || 'دریافت قیمت از سرور انجام نشد.', { code: data.code })
+    }
+    return data.data
+  } catch (error) {
+    throw normalizeApiError(error)
   }
 }
 
