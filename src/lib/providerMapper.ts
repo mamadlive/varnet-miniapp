@@ -2114,6 +2114,7 @@ const TIER_RULES: Array<{ tokens: string[]; label: string }> = [
   { tokens: ['super'], label: 'سوپر' },
   { tokens: ['max'], label: 'مکس' },
   { tokens: ['plus'], label: 'پلاس' },
+  { tokens: ['go'], label: 'Go' },
   { tokens: ['pro'], label: 'پرو' },
   { tokens: ['lite'], label: 'لایت' },
   { tokens: ['free'], label: 'رایگان' },
@@ -2331,6 +2332,32 @@ function matchTitleExtra(text: string): string | undefined {
   return TITLE_EXTRAS.find((entry) => entry.tokens.some((token) => hasToken(text, token)))?.label
 }
 
+/**
+ * "GPT Pro 500" / "Pro100" — the plan size is part of the product identity, so
+ * the number has to stay glued to «پرو» instead of being dropped.
+ */
+function matchProNumber(text: string): string | undefined {
+  const match = text.match(/\bpro[\s-]*(\d{2,4})\b/)
+  return match ? toPersianDigits(match[1]!) : undefined
+}
+
+/**
+ * Seat/slot and credit markers a plain tier keyword cannot express, so "2 Slots"
+ * and a bare "Credits" pack never collapse into a differently-priced sibling.
+ * Numbered credits are already covered by `parseQuota`.
+ */
+function matchPlanMarkers(text: string): string[] {
+  const markers: string[] = []
+
+  const slots = text.match(/(\d+)\s*slots?\b/)
+  if (slots) markers.push(`${toPersianDigits(slots[1]!)} اسلات`)
+  else if (/\bslots?\b/.test(text)) markers.push('اسلات')
+
+  if (/\bcredits?\b/.test(text) && !/\d+\s*credits?\b/.test(text)) markers.push('اعتبار')
+
+  return markers
+}
+
 function matchRegion(text: string): string | undefined {
   const rule = REGION_RULES.find((entry) =>
     entry.tokens.some((token) => hasToken(text, token)),
@@ -2457,12 +2484,23 @@ function localizeTitle(
   const quota = parseQuota(text)
   const region = matchRegion(text)
   const amount = parseAmount(text)
+  const proNumber = matchProNumber(text)
+  const planMarkers = matchPlanMarkers(text)
+  // "Pro 500" and "500 Credits" name the same number — keep it once.
+  const tierNumber = proNumber && quota?.includes(proNumber) ? undefined : proNumber
 
   const parts: string[] = []
+  /** Appends a segment once — "500 Credits" already contains «اعتبار». */
+  const push = (label: string | undefined) => {
+    if (!label || parts.some((part) => part === label || part.includes(label))) return
+    parts.push(label)
+  }
+
   if (brand) {
     parts.push(brand.name)
     for (const tier of tierLabels) {
-      if (!brand.name.includes(tier)) parts.push(tier)
+      if (brand.name.includes(tier)) continue
+      parts.push(tierNumber && tier === 'پرو' ? `پرو ${tierNumber}` : tier)
     }
   } else {
     const fallback = englishFallbackTitle(raw)
@@ -2476,21 +2514,21 @@ function localizeTitle(
       const tierRule = TIER_RULES.find((rule) => rule.label === tier)
       const nameHasTier =
         tierRule?.tokens.some((token) => hasToken(normalize(fallback), token)) ?? false
-      if (!nameHasTier) parts.push(tier)
+      if (!nameHasTier) parts.push(tierNumber && tier === 'پرو' ? `پرو ${tierNumber}` : tier)
     }
   }
 
-  if (extra) parts.push(extra)
-  if (duration) parts.push(duration)
-  if (quota && !duration) parts.push(quota)
-  if (region) parts.push(region)
-  if (amount) parts.push(amount)
+  push(extra)
+  push(duration)
+  if (!duration) push(quota)
+  push(region)
+  push(amount)
+  // Slot/credit markers keep differently-priced siblings apart.
+  for (const marker of planMarkers) push(marker)
 
   // Type/warranty markers ("CDK", "Apple Pay", "No Card", …) keep two offers of
   // the same brand distinguishable in the title itself, not only in a chip.
-  for (const tag of extractProductTags(raw, combinedText)) {
-    if (!parts.some((part) => part.includes(tag))) parts.push(tag)
-  }
+  for (const tag of extractProductTags(raw, combinedText)) push(tag)
 
   return parts.join(' ')
 }
@@ -2548,6 +2586,14 @@ function localizeSubtitle(raw: string | undefined, category: ProductCategory): s
 }
 
 /**
+ * The «Go» tier is a lighter, cheaper plan than the higher ChatGPT-style tiers;
+ * customers who bought it must be told so explicitly, because the brand blurb
+ * only describes the flagship plan.
+ */
+const GO_PLAN_NOTE =
+  'پلن «Go» نسخه اقتصادی و سبک‌تر این سرویس است و امکانات کمتری نسبت به پلن‌های بالاتر (مانند Plus و Pro) دارد؛ شرایط تحویل و گارانتی مطابق متن ارائه‌دهنده است.'
+
+/**
  * Upstream prose is usually English marketing copy that the phrase table cannot
  * fully translate. In that case the brand/category blurb is more useful on the
  * card than raw English, so it becomes the localized description while the
@@ -2558,17 +2604,21 @@ function localizeDescription(
   category: ProductCategory,
   title: string,
   brand: BrandRule | undefined,
+  goPlan = false,
 ): string {
-  if (raw?.trim() && PERSIAN_RE.test(raw)) return raw.trim()
+  const finalize = (text: string) =>
+    goPlan && !text.includes(GO_PLAN_NOTE) ? `${text} ${GO_PLAN_NOTE}` : text
+
+  if (raw?.trim() && PERSIAN_RE.test(raw)) return finalize(raw.trim())
 
   if (raw?.trim()) {
     const translated = replacePhrases(raw)
     if (PERSIAN_RE.test(translated) && !LATIN_RE.test(translated) && translated.length >= 25) {
-      return translated
+      return finalize(translated)
     }
   }
 
-  return `${title}؛ ${brand?.blurb ?? CATEGORY_DESCRIPTIONS[category]}`
+  return finalize(`${title}؛ ${brand?.blurb ?? CATEGORY_DESCRIPTIONS[category]}`)
 }
 
 function localizeFeatures(
@@ -2661,7 +2711,11 @@ export function localizeProviderProduct(product: AccountProduct): AccountProduct
   const providerTitle = product.providerTitle ?? product.title
   const category = product.customCategory ?? classifyProduct(providerTitle)
   const title = localizeTitle(product.title, category, text, brand)
-  const description = product.faDescription ?? localizeDescription(product.description, category, title, brand)
+  // «Go» is a distinct plan, so its generated description carries a dedicated note.
+  const goPlan = hasToken(normalize(product.title), 'go')
+  const description =
+    product.faDescription ??
+    localizeDescription(product.description, category, title, brand, goPlan)
   const rawDescription = product.description?.trim()
 
   return {

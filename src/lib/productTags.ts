@@ -23,6 +23,7 @@ export interface ProductTagRule {
 }
 
 export const PRODUCT_TAG_RULES: readonly ProductTagRule[] = [
+  { tokens: ['go'], label: 'Go', titleOnly: true },
   { tokens: ['full warranty'], label: 'گارانتی کامل' },
   { tokens: ['fw'], label: 'گارانتی کامل', titleOnly: true },
   { tokens: ['apple pay'], label: 'اپل پی' },
