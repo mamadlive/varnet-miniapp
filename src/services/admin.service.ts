@@ -1,12 +1,9 @@
-import { sleep } from '@/lib/utils'
 import type { AutoMarginTier } from '@/lib/pricing'
 import { ApiError, apiGetProxy, apiPostProxy } from '@/services/apiClient'
 import { getAdminSessionToken } from '@/services/adminAuth.service'
 import { endpoints } from '@/services/endpoints'
-import { mockAdminStats, mockRevenueSeries } from '@/services/mocks'
 import { getTelegramInitData } from '@/services/telegram'
 import type {
-  AdminStats,
   BankAccountDetails,
   Order,
   PaymentReceipt,
@@ -26,7 +23,7 @@ import type {
  * Functions, authorized by either the OTP admin token (`Authorization:
  * Bearer`) or a Mini App admin's Telegram `initData`. The user list is always
  * D1-backed — never fixtures — so every row id is a valid wallet-adjustment
- * target. Dashboards, orders and servers still render local fixtures.
+ * target. Dashboard metrics, orders and servers are also D1-backed.
  */
 
 interface AdminEnvelope<T> {
@@ -94,14 +91,22 @@ export async function deleteAdminProducts(productIds: string[]): Promise<void> {
   }
 }
 
-export async function fetchAdminStats(): Promise<AdminStats> {
-  await sleep(200)
-  return mockAdminStats
+export interface DashboardStats {
+  totalUsers: number
+  totalSales: number
+  pendingOrders: number
+  pendingReceipts: number
+  revenue: RevenuePoint[]
 }
 
-export async function fetchRevenueSeries(): Promise<RevenuePoint[]> {
-  await sleep(220)
-  return mockRevenueSeries
+export async function fetchAdminStats(): Promise<DashboardStats> {
+  const stats = await adminGet<DashboardStats>('/api/admin/stats')
+  if (!stats || !['totalUsers', 'totalSales', 'pendingOrders', 'pendingReceipts'].every(
+    (key) => typeof stats[key as keyof DashboardStats] === 'number' && Number.isFinite(stats[key as keyof DashboardStats]),
+  ) || !Array.isArray(stats.revenue) || !stats.revenue.every(
+    (point) => point !== null && typeof point === 'object' && typeof point.label === 'string' && Number.isFinite(point.revenue) && Number.isFinite(point.orders),
+  )) throw new ApiError('آمار دریافتی داشبورد نامعتبر بود.')
+  return stats
 }
 
 export async function listUsers(): Promise<User[]> {

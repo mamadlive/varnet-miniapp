@@ -15,6 +15,7 @@
  */
 
 import { sendVpnDocument, type TelegramDeliveryResult } from '../../_lib/staticIpDelivery'
+import { notifyBuyer } from '../../_lib/notifications'
 import {
   authenticateAdmin,
   failure,
@@ -225,6 +226,11 @@ async function completeOrder(
     }
   }
 
+  const notification = await notifyBuyer(
+    context.env, db, order.user_id,
+    `سفارش شما تکمیل شد.\nشناسه سفارش: ${order.id}\nمحصول: ${order.product_title}\nاطلاعات تحویل در مینی‌اپ قابل مشاهده است.`,
+  )
+
   return jsonResponse({
     success: true,
     message: 'سفارش تکمیل شد و اطلاعات تحویل برای کاربر ثبت گردید.',
@@ -234,6 +240,7 @@ async function completeOrder(
       deliveryNote,
       updatedAt: now,
       telegramDelivery,
+      notification,
     },
   })
 }
@@ -312,13 +319,24 @@ async function rejectOrder(
 
   const refunded = refundTotal > 0 && (results[1]?.meta?.changes ?? 0) === 1 ? refundTotal : 0
   const result: RefundResult = { refunded, balance }
+  const refundMessage = refunded > 0
+    ? `${refunded.toLocaleString('en-US')} تومان به کیف پول شما بازگردانده شد.`
+    : refundTotal > 0
+      ? 'در این اقدام مبلغی به کیف پول بازگردانده نشد؛ برای بررسی با پشتیبانی تماس بگیرید.'
+      : 'این سفارش پرداختی نداشت و مبلغی بازگردانده نشد.'
+  const notification = await notifyBuyer(
+    context.env, db, order.user_id,
+    `سفارش شما رد شد.\nشناسه سفارش: ${order.id}\nمحصول: ${order.product_title}\nدلیل: ${reason}\n${refundMessage}`,
+  )
 
   return jsonResponse({
     success: true,
     message: refunded > 0
       ? `سفارش رد شد و ${refunded.toLocaleString('en-US')} تومان به کیف پول کاربر برگشت.`
-      : 'سفارش رد شد. این سفارش پرداختی نداشت و مبلغی به کیف پول برنگشت.',
-    data: { orderId: order.id, status: 'refunded', reason, ...result },
+      : refundTotal > 0
+        ? 'سفارش رد شد؛ در این اقدام مبلغی به کیف پول برنگشت. وضعیت بازپرداخت را بررسی کنید.'
+        : 'سفارش رد شد. این سفارش پرداختی نداشت و مبلغی به کیف پول برنگشت.',
+    data: { orderId: order.id, status: 'refunded', reason, ...result, notification },
   })
 }
 

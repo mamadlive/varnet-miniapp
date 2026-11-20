@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { Plus, Search, TicketPercent } from 'lucide-react'
 import { AdminPageHeader } from '@/components/admin/AdminPageHeader'
 import { DataTable } from '@/components/admin/AdminTable'
@@ -12,7 +12,7 @@ import { Switch } from '@/components/ui/Switch'
 import { formatCount, formatCurrency, formatDate } from '@/lib/format'
 import { describeCouponValue, isCouponExhausted, isCouponExpired } from '@/lib/pricing'
 import { cn } from '@/lib/utils'
-import { useAdminStore } from '@/store/adminStore'
+import { deleteCoupon, listCoupons, saveCoupon, setCouponActive } from '@/services/coupons.service'
 import type { Coupon, DiscountType } from '@/types'
 
 const MAX_FIXED_DISCOUNT = 10_000_000
@@ -23,7 +23,7 @@ interface CouponDraft {
   minSubtotal: string
   maxDiscount: string
   usageLimit: string
-  expiresInDays: string
+  expiresAt: string
   description: string
 }
 
@@ -33,26 +33,35 @@ const EMPTY_DRAFT: CouponDraft = {
   minSubtotal: '',
   maxDiscount: '',
   usageLimit: '',
-  expiresInDays: '30',
+  expiresAt: '',
   description: '',
 }
 
 function toOptionalNumber(value: string): number | undefined {
-  const parsed = Number(value.replace(/[^\d.]/g, ''))
-  return value.trim() === '' || !Number.isFinite(parsed) ? undefined : Math.round(parsed)
+  return value.trim() === '' ? undefined : Number(value)
 }
 
 export default function CouponsPage() {
-  const coupons = useAdminStore((state) => state.coupons)
-  const saveCoupon = useAdminStore((state) => state.saveCoupon)
-  const toggleCoupon = useAdminStore((state) => state.toggleCoupon)
-
+  const [coupons, setCoupons] = useState<Coupon[]>([])
+  const [loading, setLoading] = useState(true)
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const [loadError, setLoadError] = useState(false)
+  const [editing, setEditing] = useState<Coupon | null>(null)
   const [query, setQuery] = useState('')
   const [formOpen, setFormOpen] = useState(false)
   const [type, setType] = useState<DiscountType>('percent')
   const [draft, setDraft] = useState<CouponDraft>(EMPTY_DRAFT)
   const [formError, setFormError] = useState<string | null>(null)
   const [notice, setNotice] = useState<string | null>(null)
+
+  useEffect(() => {
+    let cancelled = false
+    listCoupons().then((data) => { if (!cancelled) setCoupons(data) })
+      .catch((cause: unknown) => { if (!cancelled) { setLoadError(true); setError(cause instanceof Error ? cause.message : 'دریافت کدها انجام نشد.') } })
+      .finally(() => { if (!cancelled) setLoading(false) })
+    return () => { cancelled = true }
+  }, [])
 
   const filtered = useMemo(() => {
     const needle = query.trim().toLowerCase()
@@ -67,6 +76,7 @@ export default function CouponsPage() {
 
   const resetForm = () => {
     setType('percent')
+    setEditing(null)
     setDraft(EMPTY_DRAFT)
     setFormError(null)
   }
@@ -76,20 +86,34 @@ export default function CouponsPage() {
     resetForm()
   }
 
-  const handleCreate = () => {
+  const openEdit = (coupon: Coupon) => {
+    setEditing(coupon)
+    setType(coupon.type)
+    const localDate = coupon.expiresAt ? new Date(coupon.expiresAt) : null
+    const expiresAt = localDate && Number.isFinite(localDate.getTime())
+      ? new Date(localDate.getTime() - localDate.getTimezoneOffset() * 60_000).toISOString().slice(0, 16) : ''
+    setDraft({ code: coupon.code, value: String(coupon.value), minSubtotal: coupon.minSubtotal?.toString() ?? '',
+      maxDiscount: coupon.maxDiscount?.toString() ?? '', usageLimit: coupon.usageLimit?.toString() ?? '',
+      expiresAt, description: coupon.description ?? '' })
+    setFormError(null)
+    setFormOpen(true)
+  }
+
+  const handleCreate = async () => {
+    if (busy) return
     const code = draft.code.trim().toUpperCase()
 
     if (!/^[A-Z0-9_-]{3,24}$/.test(code)) {
       setFormError('کد باید ۳ تا ۲۴ کاراکتر انگلیسی، عدد، خط تیره یا زیرخط باشد.')
       return
     }
-    if (coupons.some((coupon) => coupon.code === code)) {
+    if (coupons.some((coupon) => coupon.id !== editing?.id && coupon.code.toUpperCase() === code)) {
       setFormError('این کد قبلاً ساخته شده است.')
       return
     }
 
     const value = toOptionalNumber(draft.value)
-    if (value === undefined || value <= 0) {
+    if (value === undefined || !Number.isSafeInteger(value) || value <= 0) {
       setFormError('مقدار تخفیف را وارد کنید.')
       return
     }
@@ -102,30 +126,60 @@ export default function CouponsPage() {
       return
     }
 
-    const expiresInDays = toOptionalNumber(draft.expiresInDays)
+    const minSubtotal = toOptionalNumber(draft.minSubtotal)
+    const maxDiscount = toOptionalNumber(draft.maxDiscount)
     const usageLimit = toOptionalNumber(draft.usageLimit)
-
-    const coupon: Coupon = {
-      id: `coup_${Date.now().toString(36)}`,
-      code,
-      type,
-      value,
-      minSubtotal: toOptionalNumber(draft.minSubtotal),
-      maxDiscount: type === 'percent' ? toOptionalNumber(draft.maxDiscount) : undefined,
-      active: true,
-      usageLimit,
-      usedCount: 0,
-      expiresAt:
-        expiresInDays !== undefined
-          ? new Date(Date.now() + expiresInDays * 86_400_000).toISOString()
-          : undefined,
-      description: draft.description.trim() || undefined,
+    if ([minSubtotal, maxDiscount, usageLimit].some((n) => n !== undefined && (!Number.isSafeInteger(n) || n < 0)) || usageLimit === 0) {
+      setFormError('شرایط کد باید اعداد صحیح و معتبر باشند.')
+      return
     }
+    const expiryDate = draft.expiresAt ? new Date(draft.expiresAt) : null
+    if (expiryDate && !Number.isFinite(expiryDate.getTime())) {
+      setFormError('تاریخ انقضا نامعتبر است.')
+      return
+    }
+    const originalExpiry = editing?.expiresAt ? new Date(editing.expiresAt).getTime() : NaN
+    const expiryDifference = expiryDate ? originalExpiry - expiryDate.getTime() : NaN
+    const expiresAt = expiryDifference >= 0 && expiryDifference < 60_000
+      ? editing?.expiresAt : expiryDate?.toISOString()
+    setBusy(true)
+    try {
+      const saved = await saveCoupon({ code, type, value, minSubtotal,
+        maxDiscount: type === 'percent' ? maxDiscount : undefined,
+        active: editing?.active ?? true, usageLimit, expiresAt,
+        description: draft.description.trim() || undefined }, editing?.id)
+      setCoupons((previous) => editing ? previous.map((item) => item.id === saved.id ? saved : item) : [...previous, saved])
+      setNotice(`کد ${code} ذخیره شد.`)
+      closeForm()
+    } catch (cause) {
+      setFormError(cause instanceof Error ? cause.message : 'ذخیره کد انجام نشد.')
+    } finally {
+      setBusy(false)
+    }
+  }
 
-    saveCoupon(coupon)
-    setNotice(`کد ${code} ساخته شد.`)
-    window.setTimeout(() => setNotice(null), 3200)
-    closeForm()
+  const toggleCoupon = async (coupon: Coupon) => {
+    if (busy) return
+    setBusy(true)
+    setError(null)
+    try {
+      const saved = await setCouponActive(coupon.id, !coupon.active)
+      setCoupons((previous) => previous.map((item) => item.id === saved.id ? saved : item))
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : 'تغییر وضعیت انجام نشد.')
+    } finally { setBusy(false) }
+  }
+
+  const removeCoupon = async (coupon: Coupon) => {
+    if (busy || !window.confirm(`کد ${coupon.code} حذف شود؟`)) return
+    setBusy(true)
+    setError(null)
+    try {
+      await deleteCoupon(coupon.id)
+      setCoupons((previous) => previous.filter((item) => item.id !== coupon.id))
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : 'حذف کد انجام نشد.')
+    } finally { setBusy(false) }
   }
 
   const columns: DataTableColumn<Coupon>[] = [
@@ -206,7 +260,8 @@ export default function CouponsPage() {
           <Switch
             checked={coupon.active}
             label={`${coupon.active ? 'غیرفعال کردن' : 'فعال کردن'} کد ${coupon.code}`}
-            onCheckedChange={() => toggleCoupon(coupon.id)}
+            disabled={busy}
+            onCheckedChange={() => void toggleCoupon(coupon)}
           />
           <span
             className={cn(
@@ -216,6 +271,15 @@ export default function CouponsPage() {
           >
             {coupon.active ? 'فعال' : 'غیرفعال'}
           </span>
+        </div>
+      ),
+    },
+    {
+      key: 'actions', header: 'عملیات',
+      render: (coupon) => (
+        <div className="flex gap-2">
+          <Button size="sm" variant="secondary" disabled={busy} onClick={() => openEdit(coupon)}>ویرایش</Button>
+          <Button size="sm" variant="destructive" disabled={busy} onClick={() => void removeCoupon(coupon)}>حذف</Button>
         </div>
       ),
     },
@@ -235,6 +299,7 @@ export default function CouponsPage() {
         actions={
           <Button
             size="sm"
+            disabled={loading || busy || loadError}
             leftIcon={<Plus className="size-4" />}
             onClick={() => {
               resetForm()
@@ -250,9 +315,10 @@ export default function CouponsPage() {
         <span>{formatCount(coupons.length)} کد ثبت‌شده</span>
         <span className="text-tg-hint/50">·</span>
         <span>{formatCount(redemptions)} استفاده</span>
-        <span className="text-tg-hint/50">·</span>
-        <span>ذخیره‌سازی آزمایشی در همین مرورگر</span>
       </div>
+
+      {error ? <p role="alert" className="rounded-xl bg-tg-destructive/10 px-3 py-2 text-tg-destructive">{error} <Button size="sm" variant="secondary" onClick={() => window.location.reload()}>تلاش مجدد</Button></p> : null}
+      {loading ? <p role="status">در حال دریافت کدها…</p> : null}
 
       {notice ? (
         <p
@@ -263,7 +329,7 @@ export default function CouponsPage() {
         </p>
       ) : null}
 
-      <DataTable<Coupon>
+      {!loading && !loadError ? <DataTable<Coupon>
         columns={columns}
         rows={filtered}
         rowKey={(coupon) => coupon.id}
@@ -311,20 +377,20 @@ export default function CouponsPage() {
             {formatCount(filtered.length)} از {formatCount(coupons.length)} کد نمایش داده می‌شود.
           </p>
         }
-      />
+      /> : null}
 
       <Sheet
         open={formOpen}
-        onClose={closeForm}
-        title="کد تخفیف جدید"
+        onClose={() => { if (!busy) closeForm() }}
+        title={editing ? 'ویرایش کد تخفیف' : 'کد تخفیف جدید'}
         description="کد پس از ذخیره بلافاصله در چک‌اوت مینی‌اپ قابل استفاده است."
         className="max-h-[90dvh] overflow-y-auto sm:max-w-lg"
         footer={
           <div className="flex flex-col gap-2 sm:flex-row-reverse">
-            <Button className="flex-1" onClick={handleCreate} leftIcon={<Plus className="size-4" />}>
-              ساخت کد
+            <Button className="flex-1" loading={busy} onClick={() => void handleCreate()} leftIcon={<Plus className="size-4" />}>
+              {editing ? 'ذخیره تغییرات' : 'ساخت کد'}
             </Button>
-            <Button className="flex-1" variant="secondary" onClick={closeForm}>
+            <Button className="flex-1" variant="secondary" disabled={busy} onClick={closeForm}>
               انصراف
             </Button>
           </div>
@@ -438,16 +504,12 @@ export default function CouponsPage() {
               hint="خالی = نامحدود"
             />
             <Input
-              label="اعتبار (روز)"
-              type="number"
-              inputMode="numeric"
-              min={1}
-              max={365}
-              value={draft.expiresInDays}
+              label="تاریخ و ساعت انقضا"
+              type="datetime-local"
+              value={draft.expiresAt}
               onChange={(event) =>
-                setDraft((previous) => ({ ...previous, expiresInDays: event.target.value }))
+                setDraft((previous) => ({ ...previous, expiresAt: event.target.value }))
               }
-              placeholder="۳۰"
               hint="خالی = بدون انقضا"
             />
           </div>

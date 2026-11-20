@@ -5,7 +5,6 @@ import { AUTO_MARGIN_TIERS, type AutoMarginTier } from '@/lib/pricing'
 import {
   mockAccountProducts,
   mockBroadcasts,
-  mockCoupons,
   mockProfitMargins,
   mockSupportTickets,
   TEST_PRODUCT_IDS,
@@ -15,7 +14,6 @@ import type {
   BankAccountDetails,
   Broadcast,
   BroadcastAudience,
-  Coupon,
   SupportTicket,
   SupportTicketCategory,
   SupportTicketStatus,
@@ -44,7 +42,6 @@ interface BroadcastInput {
 }
 
 interface AdminState {
-  coupons: Coupon[]
   /** Catalogue last synced from the provider (seeded with fixtures until then). */
   products: AccountProduct[]
   /** Provider base price → customer price markups, keyed by product id. */
@@ -71,9 +68,6 @@ interface AdminState {
    * behind the Cloudflare proxy — these never leave the browser.
    */
   providerKeys: Record<ProviderKeyId, ProviderCredential>
-  saveCoupon: (coupon: Coupon) => void
-  toggleCoupon: (id: string) => void
-  removeCoupon: (id: string) => void
   setProducts: (products: AccountProduct[]) => void
   setMargin: (productId: string, margin: ProfitMargin | null) => void
   /** Replaces the automatic ladder (already persisted via the admin API). */
@@ -126,7 +120,6 @@ function purgeProducts(state: PurgeableState, ids: string[]): Partial<AdminState
 export const useAdminStore = create<AdminState>()(
   persist(
     (set) => ({
-      coupons: mockCoupons,
       products: mockAccountProducts,
       margins: mockProfitMargins,
       marginTiers: AUTO_MARGIN_TIERS,
@@ -142,30 +135,6 @@ export const useAdminStore = create<AdminState>()(
         accounts: EMPTY_CREDENTIAL,
         wallet: EMPTY_CREDENTIAL,
         vpn: EMPTY_CREDENTIAL,
-      },
-
-      saveCoupon: (coupon) => {
-        const normalized: Coupon = { ...coupon, code: coupon.code.trim().toUpperCase() }
-        set((state) => {
-          const exists = state.coupons.some((item) => item.id === normalized.id)
-          return {
-            coupons: exists
-              ? state.coupons.map((item) => (item.id === normalized.id ? normalized : item))
-              : [normalized, ...state.coupons],
-          }
-        })
-      },
-
-      toggleCoupon: (id) => {
-        set((state) => ({
-          coupons: state.coupons.map((coupon) =>
-            coupon.id === id ? { ...coupon, active: !coupon.active } : coupon,
-          ),
-        }))
-      },
-
-      removeCoupon: (id) => {
-        set((state) => ({ coupons: state.coupons.filter((coupon) => coupon.id !== id) }))
       },
 
       setProducts: (products) => {
@@ -315,11 +284,10 @@ export const useAdminStore = create<AdminState>()(
     {
       name: 'varnet.admin.state',
       version: 1,
-      // Credentials stay out of localStorage on purpose; coupons, pricing,
+      // Credentials stay out of localStorage on purpose; pricing,
       // bank details and support state survive a refresh so the demo feels
       // like a real admin panel.
       partialize: (state) => ({
-        coupons: state.coupons,
         products: state.products,
         margins: state.margins,
         marginTiers: state.marginTiers,

@@ -8,10 +8,13 @@
  */
 
 import { verifyInitData, type TelegramMiniAppUser } from '../_lib/telegram'
+import { notifyAdmins } from '../_lib/notifications'
 
 interface D1PreparedStatement {
   bind(...values: unknown[]): D1PreparedStatement
   run(): Promise<{ success: boolean }>
+  first<T = unknown>(): Promise<T | null>
+  all<T = unknown>(): Promise<{ results: T[] }>
 }
 
 interface D1Database {
@@ -22,6 +25,7 @@ interface ReceiptEnv {
   DB?: D1Database
   TELEGRAM_BOT_TOKEN?: string
   PURCHASE_DEMO_TELEGRAM_ID?: string
+  ADMIN_TELEGRAM_IDS?: string
 }
 
 interface PagesContext {
@@ -142,10 +146,14 @@ export async function onRequestPost(context: PagesContext): Promise<Response> {
       return failure(503, 'DB_UNAVAILABLE', 'ثبت فیش واریز انجام نشد. دوباره تلاش کنید.')
     }
 
+    const notification = await notifyAdmins(
+      context.env,
+      `فیش شارژ کیف پول ثبت شد.\nشناسه فیش: ${receiptId}\nکاربر: ${[auth.user.first_name, auth.user.last_name].filter(Boolean).join(' ') || auth.user.username || auth.user.id}\nشناسه تلگرام: ${auth.user.id}\nمبلغ: ${amount.toLocaleString('en-US')} تومان\nروش پرداخت: کارت به کارت\nشماره پیگیری: ${reference}`,
+    )
     return jsonResponse({
       success: true,
       message: 'فیش واریز ثبت شد و پس از تایید ادمین به موجودی شما اضافه می‌شود.',
-      data: { receiptId, amount, status: 'PENDING', createdAt: now },
+      data: { receiptId, amount, status: 'PENDING', createdAt: now, notification },
     })
   } catch (cause) {
     return jsonResponse(

@@ -1,10 +1,8 @@
 import { useCallback, useEffect, useState } from 'react'
 import {
   ArrowLeft,
-  CalendarDays,
-  ChevronDown,
   ReceiptText,
-  Server,
+  Clock,
   Users,
   Wallet,
 } from 'lucide-react'
@@ -17,18 +15,12 @@ import { RevenueChart } from '@/components/admin/RevenueChart'
 import { ServerHealthPanel } from '@/components/admin/ServerHealthPanel'
 import { StatCard } from '@/components/admin/StatCard'
 import { OrderStatusBadge } from '@/components/admin/StatusBadges'
-import { Badge } from '@/components/ui/Badge'
-import type { BadgeTone } from '@/components/ui'
 import { Button } from '@/components/ui/Button'
 import { EmptyState } from '@/components/ui/EmptyState'
-import { formatCount, formatCurrency, formatNumber, formatRelativeTime } from '@/lib/format'
-import {
-  fetchAdminStats,
-  fetchRevenueSeries,
-  listAdminOrders,
-  listAdminNodes,
-} from '@/services/admin.service'
-import type { AdminStats, Order, RevenuePoint, StaticIpNode } from '@/types'
+import { formatCurrency, formatNumber, formatRelativeTime } from '@/lib/format'
+import { fetchAdminStats, listAdminOrders, listAdminNodes } from '@/services/admin.service'
+import type { DashboardStats } from '@/services/admin.service'
+import type { Order, StaticIpNode } from '@/types'
 
 const RECENT_ORDER_COLUMNS: DataTableColumn<Order>[] = [
   {
@@ -75,8 +67,7 @@ const RECENT_ORDER_COLUMNS: DataTableColumn<Order>[] = [
 ]
 
 export default function DashboardPage() {
-  const [stats, setStats] = useState<AdminStats | null>(null)
-  const [revenue, setRevenue] = useState<RevenuePoint[]>([])
+  const [stats, setStats] = useState<DashboardStats | null>(null)
   const [orders, setOrders] = useState<Order[]>([])
   const [nodes, setNodes] = useState<StaticIpNode[]>([])
   const [loading, setLoading] = useState(true)
@@ -84,14 +75,12 @@ export default function DashboardPage() {
 
   const load = useCallback(async () => {
     try {
-      const [statsData, revenueData, ordersData, serversData] = await Promise.all([
+      const [statsData, ordersData, serversData] = await Promise.all([
         fetchAdminStats(),
-        fetchRevenueSeries(),
         listAdminOrders(),
         listAdminNodes(),
       ])
       setStats(statsData)
-      setRevenue(revenueData)
       setOrders(ordersData)
       setNodes(serversData)
     } catch (err) {
@@ -111,15 +100,13 @@ export default function DashboardPage() {
     let cancelled = false
     const run = async () => {
       try {
-        const [statsData, revenueData, ordersData, serversData] = await Promise.all([
+        const [statsData, ordersData, serversData] = await Promise.all([
           fetchAdminStats(),
-          fetchRevenueSeries(),
           listAdminOrders(),
           listAdminNodes(),
         ])
         if (cancelled) return
         setStats(statsData)
-        setRevenue(revenueData)
         setOrders(ordersData)
         setNodes(serversData)
       } catch (err) {
@@ -137,36 +124,21 @@ export default function DashboardPage() {
   const statsLoading = loading && stats === null
   const recentOrders = orders.slice(0, 5)
 
-  const vpnAvailabilityTone: BadgeTone = !stats
-    ? 'neutral'
-    : stats.vpnNodesOnline === stats.vpnNodesTotal
-      ? 'success'
-      : stats.vpnNodesOnline === 0
-        ? 'danger'
-        : 'warning'
-
   return (
     <div className="space-y-6">
       <AdminPageHeader
         eyebrow="داشبورد"
         title="نمای کلی"
-        description="درآمد، جریان سفارش‌ها و سلامت نودهای آی‌پی ثابت در یک نگاه."
+        description="فروش، سفارش‌ها و نودهای فروشگاه در یک نگاه."
         actions={
-          <>
-            <span className="inline-flex h-9 items-center gap-2 rounded-xl border border-tg-separator bg-tg-bg px-3 text-[12.5px] font-medium text-tg-text shadow-sm">
-              <CalendarDays className="size-4 text-tg-hint" aria-hidden />
-              {formatCount(7)} روز گذشته
-              <ChevronDown className="size-3.5 text-tg-hint" aria-hidden />
-            </span>
-            <Button
-              variant="secondary"
-              size="icon"
-              className="size-9"
-              aria-label="به‌روزرسانی داشبورد"
-              loading={loading}
-              onClick={refresh}
-            />
-          </>
+          <Button
+            variant="secondary"
+            size="icon"
+            className="size-9"
+            aria-label="به‌روزرسانی داشبورد"
+            loading={loading}
+            onClick={refresh}
+          />
         }
       />
 
@@ -177,56 +149,39 @@ export default function DashboardPage() {
           {/* KPI row ------------------------------------------------------ */}
           <section aria-label="شاخص‌های کلیدی" className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
             <StatCard
-              label="کل درآمد"
-              value={stats ? formatCurrency(stats.totalRevenue) : '—'}
+              label="کل فروش"
+              value={stats ? formatCurrency(stats.totalSales) : '—'}
               icon={Wallet}
               iconClassName="bg-emerald-500/10 text-emerald-600"
-              trend={stats?.revenueChange}
-              hint="نسبت به هفته گذشته"
+              hint="سفارش‌های پرداخت‌شده و تکمیل‌شده"
               loading={statsLoading}
             />
             <StatCard
-              label="کاربران فعال"
-              value={stats ? formatNumber(stats.activeUsers) : '—'}
+              label="کل کاربران"
+              value={stats ? formatNumber(stats.totalUsers) : '—'}
               icon={Users}
-              trend={stats?.usersChange}
-              hint="نسبت به هفته گذشته"
               loading={statsLoading}
             />
             <StatCard
-              label="سفارش‌های امروز"
-              value={stats ? formatNumber(stats.ordersToday) : '—'}
-              icon={ReceiptText}
+              label="سفارش‌های در انتظار"
+              value={stats ? formatNumber(stats.pendingOrders) : '—'}
+              icon={Clock}
               iconClassName="bg-sky-500/10 text-sky-600"
-              trend={stats?.ordersChange}
-              hint="نسبت به دیروز"
               loading={statsLoading}
             />
             <StatCard
-              label="نودهای آنلاین آی‌پی ثابت"
-              value={
-                stats
-                  ? `${formatCount(stats.vpnNodesOnline)}/${formatCount(stats.vpnNodesTotal)}`
-                  : '—'
-              }
-              icon={Server}
+              label="فیش‌های در انتظار"
+              value={stats ? formatNumber(stats.pendingReceipts) : '—'}
+              icon={ReceiptText}
               iconClassName="bg-violet-500/10 text-violet-600"
-              badge={
-                stats ? (
-                  <Badge tone={vpnAvailabilityTone}>
-                    {formatCount(stats.vpnNodesOnline)} از {formatCount(stats.vpnNodesTotal)}{' '}
-                    آنلاین
-                  </Badge>
-                ) : null
-              }
-              hint="دسترس‌پذیری ناوگان"
               loading={statsLoading}
             />
           </section>
 
           {/* Revenue ----------------------------------------------------- */}
           <section aria-label="نمودار درآمد">
-            <RevenueChart data={revenue} loading={loading && revenue.length === 0} />
+            <p className="mb-2 text-[12px] text-tg-hint">فروش بر اساس تاریخ ثبت سفارش، در روزهای UTC</p>
+            <RevenueChart data={stats?.revenue ?? []} loading={statsLoading} />
           </section>
 
           {/* Orders + servers ------------------------------------------- */}

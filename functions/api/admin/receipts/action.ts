@@ -10,6 +10,7 @@
  * can never credit the wallet twice.
  */
 
+import { notifyBuyer } from '../../_lib/notifications'
 import {
   authenticateAdmin,
   failure,
@@ -85,10 +86,14 @@ async function approveReceipt(
       return failure(409, 'ORDER_NOT_PENDING', 'این سفارش قبلاً پرداخت یا لغو شده است.')
     }
 
+    const notification = await notifyBuyer(
+      context.env, db, receipt.user_id,
+      `فیش سفارش شما تایید شد و سفارش در انتظار تکمیل است.\nشناسه سفارش: ${receipt.order_id}`,
+    )
     return jsonResponse({
       success: true,
       message: 'فیش تایید شد و سفارش به وضعیت پرداخت‌شده تغییر کرد.',
-      data: { receiptId: receipt.id, status: 'APPROVED', orderId: receipt.order_id },
+      data: { receiptId: receipt.id, status: 'APPROVED', orderId: receipt.order_id, notification },
     })
   }
 
@@ -147,10 +152,17 @@ async function approveReceipt(
     balance = null
   }
 
+  const credited = (results[1]?.meta?.changes ?? 0) === 1
+  const notification = await notifyBuyer(
+    context.env, db, receipt.user_id,
+    credited
+      ? `فیش شارژ کیف پول شما تایید شد.\nشناسه فیش: ${receipt.id}\nمبلغ شارژ: ${amount.toLocaleString('en-US')} تومان`
+      : `فیش شارژ کیف پول شما تایید شد اما در این اقدام مبلغی به کیف پول اضافه نشد. برای بررسی با پشتیبانی تماس بگیرید.\nشناسه فیش: ${receipt.id}`,
+  )
   return jsonResponse({
     success: true,
-    message: 'فیش تایید شد و موجودی کیف پول کاربر افزایش یافت.',
-    data: { receiptId: receipt.id, status: 'APPROVED', amount, balance },
+    message: credited ? 'فیش تایید شد و موجودی کیف پول کاربر افزایش یافت.' : 'فیش تایید شد؛ وضعیت شارژ کیف پول را بررسی کنید.',
+    data: { receiptId: receipt.id, status: 'APPROVED', amount, balance, notification },
   })
 }
 

@@ -21,6 +21,8 @@
  * their consistency (`subtotal - discount === total`) and sane bounds.
  */
 
+import { notifyPurchaseAdmins } from './_lib/notifications'
+
 interface D1Meta {
   changes?: number
 }
@@ -28,6 +30,7 @@ interface D1Meta {
 interface D1Result {
   success: boolean
   meta?: D1Meta
+  results?: Array<{ balance: number }>
 }
 
 interface D1PreparedStatement {
@@ -44,6 +47,7 @@ interface D1Database {
 interface PurchaseEnv {
   DB?: D1Database
   TELEGRAM_BOT_TOKEN?: string
+  ADMIN_TELEGRAM_IDS?: string
   PURCHASE_DEMO_TELEGRAM_ID?: string
 }
 
@@ -242,6 +246,22 @@ async function readBalance(db: D1Database, userId: string): Promise<number | nul
   return row ? Number(row.balance) : null
 }
 
+const COUPON_GUARD = `(? IS NULL OR EXISTS (
+  SELECT 1 FROM discount_codes c
+  WHERE c.code = ? COLLATE NOCASE AND c.is_active = 1
+    AND (c.expires_at IS NULL OR julianday(c.expires_at) > julianday('now'))
+    AND (c.usage_limit IS NULL OR c.used_count < c.usage_limit)
+    AND ? >= COALESCE(c.min_subtotal, 0)
+    AND ? = MIN(?, MAX(0, CAST(ROUND(MIN(
+      CASE WHEN c.type = 'percent' THEN ? * c.value / 100.0 ELSE MIN(c.value, ?) END,
+      COALESCE(c.max_discount, ?)
+    ) / 1000.0) * 1000 AS INTEGER)))
+))`
+
+function couponGuardValues(code: string | undefined, subtotal: number, discount: number): unknown[] {
+  return [code ?? null, code ?? null, subtotal, discount, subtotal, subtotal, subtotal, subtotal]
+}
+
 /* -------------------------------------------------------------------------- */
 /* Body validation                                                            */
 /* -------------------------------------------------------------------------- */
@@ -282,13 +302,13 @@ function validateBody(body: PurchaseBody): { ok: true; value: ValidatedPurchase 
   if (subtotal === null || discount === null || total === null) {
     return { ok: false, message: 'مبلغ سفارش نامعتبر است.' }
   }
-  if (subtotal < 0 || subtotal > MAX_AMOUNT_TOMAN) {
+  if (subtotal <= 0 || subtotal > MAX_AMOUNT_TOMAN) {
     return { ok: false, message: 'مبلغ محصول خارج از محدوده مجاز است.' }
   }
   if (discount < 0 || discount > subtotal) {
     return { ok: false, message: 'مبلغ تخفیف نامعتبر است.' }
   }
-  if (total <= 0 || total !== subtotal - discount) {
+  if (total < 0 || total !== subtotal - discount) {
     return { ok: false, message: 'مبلغ قابل پرداخت با جمع سفارش هم‌خوانی ندارد.' }
   }
   if (body.currency !== undefined && body.currency !== 'IRT') {
@@ -298,13 +318,19 @@ function validateBody(body: PurchaseBody): { ok: true; value: ValidatedPurchase 
   let couponCode: string | undefined
   if (body.couponCode !== undefined) {
     const parsedCoupon = readString(body.couponCode, 64)
-    if (!parsedCoupon) return { ok: false, message: 'کد تخفیف نامعتبر است.' }
-    couponCode = parsedCoupon
+    if (!parsedCoupon || !/^[A-Za-z0-9_-]{3,24}$/.test(parsedCoupon)) {
+      return { ok: false, message: 'کد تخفیف نامعتبر است.' }
+    }
+    couponCode = parsedCoupon.toUpperCase()
+  }
+  if ((!couponCode && discount !== 0) || (couponCode && discount === 0)) {
+    return { ok: false, message: 'مبلغ تخفیف با کد واردشده مطابقت ندارد.' }
   }
 
   const paymentMethod = body.paymentMethod === 'card' ? 'card' : 'wallet'
   let receiptReference: string | undefined
   if (paymentMethod === 'card') {
+    if (total === 0) return { ok: false, message: 'برای سفارش رایگان، روش کیف پول را انتخاب کنید.' }
     const reference = readString(body.receiptReference, 64)
     if (!reference || reference.length < 4) {
       return { ok: false, message: 'شماره پیگیری واریز را کامل وارد کنید.' }
@@ -382,153 +408,86 @@ export async function onRequestPost(context: PagesContext): Promise<Response> {
     return failure(500, 'USER_NOT_FOUND', 'حساب کیف پول پیدا نشد. دوباره تلاش کنید.')
   }
 
-  if (paymentMethod === 'card') {
-    // Card-to-card: nothing is debited yet. The order waits as `pending`
-    // until an admin approves the matching `payment_receipts` row.
-    const orderId = `ord_${crypto.randomUUID()}`
-    const receiptId = `rcp_${crypto.randomUUID()}`
-
-    try {
-      await db.batch([
-        db
-          .prepare(
-            `INSERT INTO orders
-               (id, user_id, product_id, product_title, kind, quantity, subtotal, discount, total, currency, coupon_code, status, payment_method, created_at)
-             VALUES (?, ?, ?, ?, ?, 1, ?, ?, ?, 'IRT', ?, 'pending', 'card', ?)`,
-          )
-          .bind(
-            orderId,
-            userId,
-            productId,
-            title,
-            kind,
-            subtotal,
-            discount,
-            total,
-            couponCode ?? null,
-            now,
-          ),
-        db
-          .prepare(
-            `INSERT INTO payment_receipts
-               (id, user_id, telegram_id, purpose, order_id, amount, currency, reference, status, created_at)
-             VALUES (?, ?, ?, 'product_purchase', ?, ?, 'IRT', ?, 'PENDING', ?)`,
-          )
-          .bind(receiptId, userId, auth.user.id, orderId, total, receiptReference ?? '', now),
-      ])
-    } catch {
-      return failure(500, 'ORDER_WRITE_FAILED', 'ثبت سفارش کارت به کارت انجام نشد. دوباره تلاش کنید.')
-    }
-
-    return jsonResponse({
-      success: true,
-      message: 'سفارش ثبت شد و پس از تایید فیش واریز توسط ادمین تکمیل می‌شود.',
-      data: {
-        order: {
-          id: orderId,
-          status: 'pending',
-          kind,
-          productId,
-          title,
-          subtotal,
-          discount,
-          total,
-          currency: 'IRT',
-          paymentMethod: 'card',
-          createdAt: now,
-        },
-        balance,
-        receipt: { id: receiptId, status: 'PENDING' },
-      },
-    })
-  }
-
-  if (balance < total) {
-    return failure(402, 'INSUFFICIENT_FUNDS', 'موجودی کیف پول برای این خرید کافی نیست.', {
-      balance,
-      required: total,
-    })
-  }
-
-  let debitChanges = 0
-  try {
-    const debit = await db
-      .prepare('UPDATE users SET balance = balance - ?, updated_at = ? WHERE id = ? AND balance >= ?')
-      .bind(total, now, userId, total)
-      .run()
-    debitChanges = debit.meta?.changes ?? 0
-  } catch {
-    return failure(503, 'DB_UNAVAILABLE', 'ثبت پرداخت انجام نشد. دوباره تلاش کنید.')
-  }
-
-  if (debitChanges !== 1) {
-    // The guarded update lost a race (another purchase drained the wallet).
-    const latest = await readBalance(db, userId)
-    return failure(402, 'INSUFFICIENT_FUNDS', 'موجودی کیف پول برای این خرید کافی نیست.', {
-      balance: latest ?? 0,
-      required: total,
-    })
-  }
-
-  const remainingBalance = balance - total
   const orderId = `ord_${crypto.randomUUID()}`
-  const transactionId = `txn_${crypto.randomUUID()}`
+  const receiptId = `rcp_${crypto.randomUUID()}`
+  const orderStatus = paymentMethod === 'card' ? 'pending' : 'paid'
+  const statements: D1PreparedStatement[] = [
+    db.prepare(
+      `INSERT INTO orders
+         (id, user_id, product_id, product_title, kind, quantity, subtotal, discount, total, currency, coupon_code, status, payment_method, created_at)
+       SELECT ?, ?, ?, ?, ?, 1, ?, ?, ?, 'IRT', ?, ?, ?, ?
+       WHERE (? = 'card' OR EXISTS (SELECT 1 FROM users WHERE id = ? AND balance >= ?))
+         AND ${COUPON_GUARD}`,
+    ).bind(
+      orderId, userId, productId, title, kind, subtotal, discount, total, couponCode ?? null,
+      orderStatus, paymentMethod, now, paymentMethod, userId, total,
+      ...couponGuardValues(couponCode, subtotal, discount),
+    ),
+  ]
 
-  try {
-    await db.batch([
-      db
-        .prepare(
-          `INSERT INTO orders
-             (id, user_id, product_id, product_title, kind, quantity, subtotal, discount, total, currency, coupon_code, status, payment_method, created_at)
-           VALUES (?, ?, ?, ?, ?, 1, ?, ?, ?, 'IRT', ?, 'paid', 'wallet', ?)`,
-        )
-        .bind(
-          orderId,
-          userId,
-          productId,
-          title,
-          kind,
-          subtotal,
-          discount,
-          total,
-          couponCode ?? null,
-          now,
-        ),
-      db
-        .prepare(
-          `INSERT INTO wallet_transactions
-             (id, user_id, type, amount, balance_after, currency, description, reference, created_at)
-           VALUES (?, ?, 'purchase', ?, ?, 'IRT', ?, ?, ?)`,
-        )
-        .bind(
-          transactionId,
-          userId,
-          -total,
-          remainingBalance,
-          `خرید ${title}`,
-          orderId,
-          now,
-        ),
-    ])
-  } catch {
-    // The batch is atomic, so the order did not persist: return the money.
-    try {
-      await db
-        .prepare('UPDATE users SET balance = balance + ?, updated_at = ? WHERE id = ?')
-        .bind(total, new Date().toISOString(), userId)
-        .run()
-    } catch {
-      // A failed refund must not mask the original write failure.
-    }
-    return failure(500, 'ORDER_WRITE_FAILED', 'ثبت سفارش انجام نشد؛ مبلغ به کیف پول بازگردانده شد.')
+  if (paymentMethod === 'wallet') {
+    statements.push(
+      db.prepare(
+        `UPDATE users SET balance = balance - ?, updated_at = ?
+         WHERE id = ? AND EXISTS (SELECT 1 FROM orders WHERE id = ?)`,
+      ).bind(total, now, userId, orderId),
+      db.prepare(
+        `INSERT INTO wallet_transactions
+           (id, user_id, type, amount, balance_after, currency, description, reference, created_at)
+         SELECT ?, id, 'purchase', ?, balance, 'IRT', ?, ?, ? FROM users
+         WHERE id = ? AND EXISTS (SELECT 1 FROM orders WHERE id = ?)`,
+      ).bind(`txn_${crypto.randomUUID()}`, -total, `خرید ${title}`, orderId, now, userId, orderId),
+    )
+  } else {
+    statements.push(
+      db.prepare(
+        `INSERT INTO payment_receipts
+           (id, user_id, telegram_id, purpose, order_id, amount, currency, reference, status, created_at)
+         SELECT ?, ?, ?, 'product_purchase', ?, ?, 'IRT', ?, 'PENDING', ?
+         WHERE EXISTS (SELECT 1 FROM orders WHERE id = ?)`,
+      ).bind(receiptId, userId, auth.user.id, orderId, total, receiptReference ?? '', now, orderId),
+    )
   }
 
+  if (couponCode) {
+    statements.push(
+      db.prepare(
+        `UPDATE discount_codes SET used_count = used_count + 1
+         WHERE code = ? COLLATE NOCASE AND EXISTS (SELECT 1 FROM orders WHERE id = ?)`,
+      ).bind(couponCode, orderId),
+    )
+  }
+
+  statements.push(db.prepare('SELECT balance FROM users WHERE id = ?').bind(userId))
+
+  let results: D1Result[]
+  try {
+    results = await db.batch(statements)
+  } catch {
+    return failure(500, 'ORDER_WRITE_FAILED', 'ثبت سفارش انجام نشد. دوباره تلاش کنید.')
+  }
+  const latest = results[results.length - 1]?.results?.[0]?.balance ?? balance
+
+  if ((results[0]?.meta?.changes ?? 0) !== 1) {
+    if (paymentMethod === 'wallet' && (latest ?? 0) < total) {
+      return failure(402, 'INSUFFICIENT_FUNDS', 'موجودی کیف پول برای این خرید کافی نیست.', {
+        balance: latest ?? 0,
+        required: total,
+      })
+    }
+    return failure(409, 'COUPON_INVALID', 'کد تخفیف معتبر نیست یا شرایط آن تغییر کرده است؛ دوباره بررسی کنید.')
+  }
+
+  const remainingBalance = Number(latest)
+  const userName = [auth.user.first_name, auth.user.last_name].filter(Boolean).join(' ') || auth.user.username || String(auth.user.id)
+  const notification = await notifyPurchaseAdmins(env, { orderId, userId, userName, productTitle: title, total, paymentMethod })
   return jsonResponse({
     success: true,
+    ...(paymentMethod === 'card' ? { message: 'سفارش ثبت شد و پس از تایید فیش واریز توسط ادمین تکمیل می‌شود.' } : {}),
     data: {
       order: {
         id: orderId,
-        status: 'paid',
+        status: orderStatus,
         kind,
         productId,
         title,
@@ -536,9 +495,12 @@ export async function onRequestPost(context: PagesContext): Promise<Response> {
         discount,
         total,
         currency: 'IRT',
+        paymentMethod,
         createdAt: now,
       },
       balance: remainingBalance,
+      notification,
+      ...(paymentMethod === 'card' ? { receipt: { id: receiptId, status: 'PENDING' } } : {}),
     },
   })
 }

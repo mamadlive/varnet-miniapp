@@ -1,7 +1,6 @@
-import { formatCurrency } from '@/lib/format'
-import { couponDiscount, isCouponExhausted, isCouponExpired } from '@/lib/pricing'
-import { sleep } from '@/lib/utils'
-import { useAdminStore } from '@/store/adminStore'
+import { ApiError, apiGetProxy, apiPostProxy } from '@/services/apiClient'
+import { getAdminSessionToken } from '@/services/adminAuth.service'
+import { getTelegramInitData } from '@/services/telegram'
 import type { Coupon } from '@/types'
 
 export interface CouponValidation {
@@ -10,33 +9,46 @@ export interface CouponValidation {
   total: number
 }
 
-/**
- * Validate a customer-entered code against the admin store.
- *
- * The store doubles as the mock backend here, so codes created or disabled in
- * `/admin/coupons` take effect in the Mini App checkout immediately.
- */
-export async function validateCoupon(code: string, subtotal: number): Promise<CouponValidation> {
-  await sleep(320)
+type CouponInput = Omit<Coupon, 'id' | 'usedCount'>
+interface Envelope<T> { success?: boolean; data?: T; message?: string; code?: string }
 
-  const normalized = code.trim().toUpperCase()
-  if (!normalized) throw new Error('کد تخفیف را وارد کنید.')
+function headers(admin = false): Record<string, string> {
+  const result: Record<string, string> = {}
+  const initData = getTelegramInitData()
+  if (initData) result['X-Telegram-Init-Data'] = initData
+  const token = admin ? getAdminSessionToken() : null
+  if (token) result.Authorization = `Bearer ${token}`
+  return result
+}
 
-  const coupon = useAdminStore
-    .getState()
-    .coupons.find((item) => item.code.trim().toUpperCase() === normalized)
-
-  if (!coupon) throw new Error('این کد تخفیف وجود ندارد.')
-  if (!coupon.active) throw new Error('این کد تخفیف غیرفعال شده است.')
-  if (isCouponExpired(coupon)) throw new Error('این کد تخفیف منقضی شده است.')
-  if (isCouponExhausted(coupon)) throw new Error('ظرفیت استفاده از این کد تکمیل شده است.')
-
-  if (coupon.minSubtotal !== undefined && subtotal < coupon.minSubtotal) {
-    throw new Error(`این کد برای خریدهای بالای ${formatCurrency(coupon.minSubtotal)} فعال است.`)
+function unwrap<T>(payload: Envelope<T>): T {
+  if (!payload || payload.success !== true || payload.data === undefined) {
+    throw new ApiError(payload?.message || 'پاسخ سرور نامعتبر بود.', { code: payload?.code })
   }
+  return payload.data
+}
 
-  const discount = couponDiscount(coupon, subtotal)
-  if (discount <= 0) throw new Error('این کد برای این سفارش تخفیفی ندارد.')
+/** Preview only: the purchase endpoint must revalidate and redeem atomically. */
+export async function validateCoupon(code: string, subtotal: number): Promise<CouponValidation> {
+  return unwrap(await apiPostProxy<Envelope<CouponValidation>>('/api/coupon', { code, subtotal }, { headers: headers() }))
+}
 
-  return { coupon, discount, total: Math.max(subtotal - discount, 0) }
+export async function listCoupons(): Promise<Coupon[]> {
+  const data = unwrap(await apiGetProxy<Envelope<Coupon[]>>('/api/admin/coupons', { headers: headers(true) }))
+  if (!Array.isArray(data)) throw new ApiError('فهرست کدهای تخفیف نامعتبر است.')
+  return data
+}
+
+export async function saveCoupon(input: CouponInput, id?: string): Promise<Coupon> {
+  return unwrap(await apiPostProxy<Envelope<Coupon>>('/api/admin/coupons', {
+    action: id ? 'update' : 'create', id, ...input,
+  }, { headers: headers(true) }))
+}
+
+export async function setCouponActive(id: string, active: boolean): Promise<Coupon> {
+  return unwrap(await apiPostProxy<Envelope<Coupon>>('/api/admin/coupons', { action: 'toggle', id, active }, { headers: headers(true) }))
+}
+
+export async function deleteCoupon(id: string): Promise<void> {
+  unwrap(await apiPostProxy<Envelope<{ id: string }>>('/api/admin/coupons', { action: 'delete', id }, { headers: headers(true) }))
 }

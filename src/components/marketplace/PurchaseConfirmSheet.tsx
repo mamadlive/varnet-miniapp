@@ -182,6 +182,7 @@ export function PurchaseConfirmSheet({
 
   const removeCoupon = () => {
     haptic('light')
+    setSubmitError(null)
     updateCoupon(EMPTY_COUPON)
   }
 
@@ -234,6 +235,9 @@ export function PurchaseConfirmSheet({
         pending: method === 'card',
       })
     } catch (cause) {
+      if (isApiError(cause) && cause.code === 'COUPON_INVALID') {
+        updateCoupon({ applied: null, error: cause.message })
+      }
       setSubmitError({
         message: cause instanceof Error ? cause.message : 'پرداخت انجام نشد. دوباره تلاش کنید.',
         code: isApiError(cause) ? cause.code : undefined,
@@ -283,7 +287,7 @@ export function PurchaseConfirmSheet({
               fullWidth
               size="lg"
               loading={submitting}
-              disabled={total <= 0 || (method === 'card' && bankError !== null)}
+              disabled={price <= 0 || (method === 'card' && (total === 0 || bankError !== null))}
               onClick={handleConfirm}
               leftIcon={
                 method === 'card' ? (
@@ -355,9 +359,10 @@ export function PurchaseConfirmSheet({
                 <Input
                   id={couponInputId}
                   value={coupon.code}
-                  onChange={(event) =>
+                  onChange={(event) => {
+                    setSubmitError(null)
                     updateCoupon({ code: event.target.value, applied: null, error: null })
-                  }
+                  }}
                   placeholder="مثلاً VARNET20"
                   spellCheck={false}
                   autoCapitalize="characters"
@@ -469,7 +474,9 @@ export function PurchaseConfirmSheet({
               </div>
             </div>
 
-            {method === 'card' ? (
+            {method === 'card' && total === 0 ? (
+              <p className="text-[12px] text-tg-hint">برای سفارش رایگان، روش کیف پول را انتخاب کنید.</p>
+            ) : method === 'card' ? (
               <div className="space-y-2.5 rounded-2xl border border-dashed border-brand-500/40 bg-brand-500/[0.06] p-3.5">
                 <p className="text-[12.5px] font-semibold text-tg-text">کارت مقصد واریز</p>
                 {bankLoading ? (

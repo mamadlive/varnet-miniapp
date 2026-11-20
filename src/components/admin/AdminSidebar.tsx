@@ -15,6 +15,7 @@ import {
 } from 'lucide-react'
 import { Link, NavLink } from 'react-router-dom'
 import { UserAvatar } from '@/components/admin/UserAvatar'
+import { useAdminAuthStore } from '@/store/adminAuthStore'
 import { useAuthStore } from '@/store/authStore'
 import { fa } from '@/lib/i18n'
 import { cn } from '@/lib/utils'
@@ -77,8 +78,10 @@ interface SidebarBodyProps {
 
 function SidebarBody({ expanded, onNavigate, onClose }: SidebarBodyProps) {
   const user = useAuthStore((state) => state.user)
-  const displayName = user ? `${user.firstName} ${user.lastName ?? ''}`.trim() : 'مدیر ورنت'
-  const roleLabel = user?.role === 'admin' ? fa.roles.admin : 'مدیر نمایشی'
+  const admin = useAdminAuthStore((state) => state.admin)
+  const identity = admin ?? user
+  const displayName = identity ? `${identity.firstName} ${identity.lastName ?? ''}`.trim() : 'مدیر ورنت'
+  const roleLabel = admin || user?.role === 'admin' ? fa.roles.admin : 'مدیر نمایشی'
 
   return (
     <div className="flex h-full min-h-0 flex-col">
@@ -187,7 +190,7 @@ function SidebarBody({ expanded, onNavigate, onClose }: SidebarBodyProps) {
             expanded ? '' : 'justify-center xl:justify-start',
           )}
         >
-          <UserAvatar name={displayName} photoUrl={user?.photoUrl} size="sm" />
+          <UserAvatar name={displayName} photoUrl={admin ? undefined : user?.photoUrl} size="sm" />
           <div className={cn('min-w-0', expanded ? 'block' : 'hidden xl:block')}>
             <p className="truncate text-[12px] font-semibold text-tg-text">{displayName}</p>
             <p className="truncate text-[11px] text-tg-hint">{roleLabel}</p>

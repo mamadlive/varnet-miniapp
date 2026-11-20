@@ -2,7 +2,6 @@ import type {
   AccountProduct,
   AdminStats,
   Broadcast,
-  Coupon,
   RevenuePoint,
   SupportTicket,
   TelegramUser,
@@ -22,8 +21,6 @@ import type { ProfitMargin } from '@/lib/pricing'
 
 const iso = (daysAgo: number, hoursAgo = 0): string =>
   new Date(Date.now() - daysAgo * 86_400_000 - hoursAgo * 3_600_000).toISOString()
-
-const inDays = (days: number): string => new Date(Date.now() + days * 86_400_000).toISOString()
 
 export const mockTelegramUser: TelegramUser = {
   id: 600_000_001,
@@ -190,68 +187,6 @@ export const mockProfitMargins: Record<string, ProfitMargin> = {
   acc_netflix: { type: 'percent', value: 12 },
   acc_chatgpt: { type: 'fixed', value: 250_000 },
 }
-
-export const mockCoupons: Coupon[] = [
-  {
-    id: 'coup_varnet20',
-    code: 'VARNET20',
-    type: 'percent',
-    value: 20,
-    minSubtotal: 300_000,
-    maxDiscount: 200_000,
-    active: true,
-    usageLimit: 500,
-    usedCount: 143,
-    expiresAt: inDays(30),
-    description: 'تخفیف ۲۰٪ برای خریدهای بالای ۳۰۰ هزار تومان',
-  },
-  {
-    id: 'coup_welcome50',
-    code: 'WELCOME50',
-    type: 'fixed',
-    value: 50_000,
-    minSubtotal: 200_000,
-    active: true,
-    usageLimit: 1_000,
-    usedCount: 420,
-    expiresAt: inDays(60),
-    description: 'هدیه خوش‌آمدگویی برای اولین خرید',
-  },
-  {
-    id: 'coup_tether100',
-    code: 'TETHER100',
-    type: 'fixed',
-    value: 100_000,
-    minSubtotal: 1_000_000,
-    active: true,
-    usageLimit: 200,
-    usedCount: 37,
-    expiresAt: inDays(14),
-    description: 'تخفیف پرداخت تتری برای سفارش‌های بزرگ',
-  },
-  {
-    id: 'coup_vip10',
-    code: 'VIP10',
-    type: 'percent',
-    value: 10,
-    active: false,
-    usageLimit: 100,
-    usedCount: 88,
-    description: 'کد اختصاصی مشتریان وفادار — موقتاً غیرفعال',
-  },
-  {
-    id: 'coup_norouz15',
-    code: 'NOROOZ15',
-    type: 'percent',
-    value: 15,
-    minSubtotal: 250_000,
-    active: true,
-    usageLimit: 300,
-    usedCount: 300,
-    expiresAt: iso(14),
-    description: 'کمپین نوروز — منقضی شده',
-  },
-]
 
 /* -------------------------------------------------------------------------- */
 /* Wallet & orders                                                            */
